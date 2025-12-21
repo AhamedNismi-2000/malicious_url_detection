@@ -6,6 +6,5 @@ This project implements a Chromium-compatible browser extension for real-time ma
 ## Author_Information
 - **Name:** Ms. A.M. Nawra Sama
 - **Enrollment No:** UWU/CST/21/083
-- **Role:** Heuristic Module Developer & UI Designer
+- **Role:** Heuristic Module Developer 
 
-## Project_Structure
