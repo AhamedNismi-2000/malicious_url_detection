@@ -1,0 +1,46 @@
+# Heuristic Detection Configuration
+# Author: UWU/CST/21/083
+
+thresholds:
+  url_length:
+    warning: 75
+    danger: 100
+  dot_count:
+    warning: 4
+    danger: 6
+  subdomain_count:
+    warning: 3
+    danger: 5
+  hyphen_count:
+    warning: 2
+    danger: 4
+  path_depth:
+    warning: 3
+    danger: 5
+  digit_ratio:
+    warning: 0.3
+    danger: 0.5
+  entropy:
+    warning: 3.5
+    danger: 4.5
+
+weights:
+  has_ip: 2.0
+  has_special_chars: 1.5
+  has_redirect: 1.8
+  suspicious_tld: 1.7
+  suspicious_keyword: 1.6
+  shortened_url: 1.4
+  hex_encoded: 1.9
+  url_length: 0.1
+  dot_count: 0.3
+  subdomain_count: 0.4
+  hyphen_count: 0.3
+  high_digit_ratio: 1.2
+  high_entropy: 0.2
+
+risk_levels:
+  low: 2.0
+  medium: 4.0
+  high: 6.0
+  critical: 8.0
