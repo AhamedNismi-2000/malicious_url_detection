@@ -4,6 +4,7 @@ COMPATIBLE ENHANCED VALIDATION CODE
 - Specifically for validation set (re-evaluates after training)
 - Compatible with optimized training output
 - Business-focused validation metrics
+- Windows-compatible encoding fix
 """
 
 import os
@@ -23,17 +24,23 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
+# Fix for Windows encoding issues
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def load_validation_data(dataset="combined"):
     """Load validation data with same format as training"""
-    print(f"📊 Loading {dataset} validation data...")
+    print(f"[INFO] Loading {dataset} validation data...")
     
     split_dir = os.path.join(BASE_DIR, "data", "splits", dataset)
     val_path = os.path.join(split_dir, f"{dataset}_val.npz")
     
     if not os.path.exists(val_path):
-        print(f"❌ Validation data not found: {val_path}")
+        print(f"[ERROR] Validation data not found: {val_path}")
         return None, None
     
     try:
@@ -57,34 +64,34 @@ def load_validation_data(dataset="combined"):
         # Convert to dense if manageable
         if X_val.shape[0] * X_val.shape[1] < 50000000:  # 50M elements
             X_val = X_val.toarray()
-            print("✅ Converted to dense array")
+            print("[INFO] Converted to dense array")
         
         # Class distribution
         unique, counts = np.unique(y_val, return_counts=True)
         total = len(y_val)
         
-        print(f"✅ Validation data loaded: {total:,} samples, {X_val.shape[1]:,} features")
-        print(f"📈 Class distribution: Benign={counts[0]:,} ({100*counts[0]/total:.1f}%), "
+        print(f"[SUCCESS] Validation data loaded: {total:,} samples, {X_val.shape[1]:,} features")
+        print(f"[INFO] Class distribution: Benign={counts[0]:,} ({100*counts[0]/total:.1f}%), "
               f"Malicious={counts[1]:,} ({100*counts[1]/total:.1f}%)")
         
         return X_val, y_val
         
     except Exception as e:
-        print(f"❌ Error loading validation data: {e}")
+        print(f"[ERROR] Error loading validation data: {e}")
         return None, None
 
 def load_model_with_json_metadata(model_path):
     """Load model and JSON metadata (compatible with optimized training)"""
-    print(f"📦 Loading model: {os.path.basename(model_path)}")
+    print(f"[INFO] Loading model: {os.path.basename(model_path)}")
     
     if not os.path.exists(model_path):
-        print(f"❌ Model file not found: {model_path}")
+        print(f"[ERROR] Model file not found: {model_path}")
         return None, None, None
     
     try:
         # Load model
         model = joblib.load(model_path)
-        print(f"✅ Model loaded: {type(model).__name__}")
+        print(f"[SUCCESS] Model loaded: {type(model).__name__}")
         
         # Extract timestamp from model name
         import re
@@ -98,19 +105,19 @@ def load_model_with_json_metadata(model_path):
         if timestamp:
             json_meta_path = os.path.join(model_dir, f"model_metadata_{timestamp}.json")
             if os.path.exists(json_meta_path):
-                with open(json_meta_path, 'r') as f:
+                with open(json_meta_path, 'r', encoding='utf-8') as f:
                     metadata = json.load(f)
-                print(f"✅ JSON metadata loaded")
+                print("[INFO] JSON metadata loaded")
             else:
                 # Try pickle metadata for backward compatibility
                 pkl_meta_path = os.path.join(model_dir, f"model_metadata_{timestamp}.pkl")
                 if os.path.exists(pkl_meta_path):
                     metadata = joblib.load(pkl_meta_path)
-                    print(f"✅ Pickle metadata loaded")
+                    print("[INFO] Pickle metadata loaded")
         
         # Default if no metadata found
         if not metadata:
-            print("⚠️  No metadata found. Using default settings.")
+            print("[WARNING] No metadata found. Using default settings.")
             metadata = {
                 'performance': {'optimal_threshold': 0.5},
                 'model_info': {'minority_class': 1},
@@ -119,13 +126,13 @@ def load_model_with_json_metadata(model_path):
         
         # Get minority class (critical for validation)
         minority_class = metadata.get('model_info', {}).get('minority_class', 1)
-        print(f"   Minority class: {minority_class}")
-        print(f"   Training date: {metadata.get('training_info', {}).get('training_date', 'Unknown')}")
+        print(f"[INFO] Minority class: {minority_class}")
+        print(f"[INFO] Training date: {metadata.get('training_info', {}).get('training_date', 'Unknown')}")
         
         return model, metadata, minority_class
         
     except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        print(f"[ERROR] Error loading model: {e}")
         return None, None, None
 
 def validate_single_model(model, metadata, minority_class, X_val, y_val):
@@ -134,7 +141,7 @@ def validate_single_model(model, metadata, minority_class, X_val, y_val):
     # Get threshold from metadata
     threshold = metadata.get('performance', {}).get('optimal_threshold', 0.5)
     
-    print(f"\n🔍 Validating with threshold: {threshold:.4f}")
+    print(f"\n[ANALYSIS] Validating with threshold: {threshold:.4f}")
     
     # Get probabilities for minority class
     y_proba = model.predict_proba(X_val)[:, minority_class]
@@ -213,51 +220,52 @@ def validate_single_model(model, metadata, minority_class, X_val, y_val):
         'imbalance_ratio': metadata.get('dataset_info', {}).get('imbalance_ratio', 'N/A')
     }
     
-    # Print results
-    print(f"   📈 Performance:")
+    # Print results with ASCII indicators instead of emoji
+    print(f"   [PERFORMANCE]")
     print(f"     Recall:        {recall:.4f} (Detection Rate)")
     print(f"     Precision:     {precision:.4f}")
     print(f"     F1-Score:      {f1:.4f}")
     print(f"     AUC-ROC:       {auc_score:.4f}")
     
-    print(f"\n   ⚠️  Error Metrics:")
+    print(f"\n   [ERROR METRICS]")
     print(f"     False Positive: {fpr:.4f} ({fp}/{benign_samples})")
     print(f"     False Negative: {fnr:.4f} ({fn}/{malicious_samples})")
     
-    print(f"\n   💡 Business Impact:")
+    print(f"\n   [BUSINESS IMPACT]")
     print(f"     Detection Rate: {detection_rate:.1%}")
     print(f"     Business Score: {business_score:.3f}")
     
     if best_alt_threshold != threshold:
-        print(f"\n   🎯 Suggestion: Try threshold {best_alt_threshold:.3f}")
+        print(f"\n   [SUGGESTION] Try threshold {best_alt_threshold:.3f}")
         print(f"     Business score improvement: +{best_alt_score - business_score:.3f}")
     
-    print(f"\n   🚀 Deployment: {'✅ READY' if deployment_ready else '❌ NOT READY'}")
+    deployment_status = "[PASS]" if deployment_ready else "[FAIL]"
+    print(f"\n   [DEPLOYMENT] {deployment_status}")
     
     return results
 
 def validate_all_models(models_dir):
     """Validate all models in directory"""
-    print(f"\n🔍 Searching for models in: {models_dir}")
+    print(f"\n[SEARCH] Searching for models in: {models_dir}")
     
     if not os.path.exists(models_dir):
-        print(f"❌ Directory not found: {models_dir}")
+        print(f"[ERROR] Directory not found: {models_dir}")
         return []
     
     # Find model files
     model_files = [f for f in os.listdir(models_dir) 
-                  if f.endswith('.pkl') and f.startswith('rf_enhanced')]
+                  if f.endswith('.pkl') and (f.startswith('rf_enhanced') or f.startswith('rf_optimized'))]
     
     if not model_files:
-        print("❌ No enhanced models found")
+        print("[WARNING] No enhanced models found")
         return []
     
-    print(f"📁 Found {len(model_files)} model(s)")
+    print(f"[INFO] Found {len(model_files)} model(s)")
     
     all_results = []
     
     for model_file in sorted(model_files):
-        print(f"\n{'='*60}")
+        print(f"\n" + "="*60)
         model_path = os.path.join(models_dir, model_file)
         
         # Load model and metadata
@@ -272,7 +280,7 @@ def validate_all_models(models_dir):
     return all_results
 
 def save_validation_results(results, save_dir, dataset):
-    """Save validation results to files"""
+    """Save validation results to files with proper encoding"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(save_dir, exist_ok=True)
     
@@ -280,20 +288,21 @@ def save_validation_results(results, save_dir, dataset):
     df = pd.DataFrame(results)
     
     if df.empty:
-        print("❌ No validation results to save")
-        return
+        print("[ERROR] No validation results to save")
+        return df
     
     # Sort by business score (higher is better)
     df = df.sort_values('business_score', ascending=False)
     
     # Save CSV
     csv_path = os.path.join(save_dir, f"validation_results_{timestamp}.csv")
-    df.to_csv(csv_path, index=False)
+    df.to_csv(csv_path, index=False, encoding='utf-8')
+    print(f"[SAVED] CSV results: {csv_path}")
     
-    # Generate summary
+    # Generate summary with ASCII formatting
     summary_path = os.path.join(save_dir, f"validation_summary_{timestamp}.txt")
     
-    with open(summary_path, 'w') as f:
+    with open(summary_path, 'w', encoding='utf-8') as f:
         f.write("=" * 70 + "\n")
         f.write("MODEL VALIDATION SUMMARY\n")
         f.write("=" * 70 + "\n\n")
@@ -310,7 +319,8 @@ def save_validation_results(results, save_dir, dataset):
             f.write(f"   Business Score: {row['business_score']:.3f}\n")
             f.write(f"   Recall: {row['recall']:.4f}, FPR: {row['false_positive_rate']:.4f}\n")
             f.write(f"   F1: {row['f1_score']:.4f}, AUC: {row['auc_roc']:.4f}\n")
-            f.write(f"   Deployment Ready: {'✅' if row['deployment_ready'] else '❌'}\n")
+            deployment_status = "[PASS]" if row['deployment_ready'] else "[FAIL]"
+            f.write(f"   Deployment Ready: {deployment_status}\n")
             f.write(f"   Suggested Threshold: {row['suggested_threshold']:.3f}\n")
         
         f.write(f"\nDEPLOYMENT RECOMMENDATION:\n")
@@ -319,21 +329,19 @@ def save_validation_results(results, save_dir, dataset):
         ready_models = df[df['deployment_ready']]
         if len(ready_models) > 0:
             best_model = ready_models.iloc[0]
-            f.write(f"\n✅ RECOMMENDED FOR DEPLOYMENT:\n")
+            f.write(f"\n[RECOMMENDED] FOR DEPLOYMENT:\n")
             f.write(f"   Model: {best_model['model_name']}\n")
             f.write(f"   Detection Rate: {best_model['recall']:.1%}\n")
             f.write(f"   False Alarm Rate: {best_model['false_positive_rate']:.1%}\n")
             f.write(f"   Threshold: {best_model['threshold']:.3f}\n")
             f.write(f"   Business Score: {best_model['business_score']:.3f}\n")
         else:
-            f.write(f"\n❌ NO MODELS READY FOR DEPLOYMENT\n")
+            f.write(f"\n[NOT READY] NO MODELS READY FOR DEPLOYMENT\n")
             f.write(f"   Best candidate: {df.iloc[0]['model_name']}\n")
             f.write(f"   Issues: Recall={df.iloc[0]['recall']:.1%} (<70%) or FPR={df.iloc[0]['false_positive_rate']:.1%} (>3%)\n")
             f.write(f"   Suggested improvement: Try threshold {df.iloc[0]['suggested_threshold']:.3f}\n")
     
-    print(f"\n💾 Results saved:")
-    print(f"   CSV: {csv_path}")
-    print(f"   Summary: {summary_path}")
+    print(f"[SAVED] Summary report: {summary_path}")
     
     return df
 
@@ -342,12 +350,13 @@ def main():
     parser.add_argument('--model', type=str, help='Path to specific model to validate')
     parser.add_argument('--all', action='store_true', help='Validate all models in directory')
     parser.add_argument('--dataset', type=str, default='combined', help='Dataset name')
+    parser.add_argument('--threshold', type=float, help='Custom threshold for validation')
     
     args = parser.parse_args()
     
     print("\n" + "=" * 70)
-    print("🧪 ENHANCED MODEL VALIDATION")
-    print("   Compatible with optimized training output")
+    print("ENHANCED MODEL VALIDATION")
+    print("Compatible with optimized training output")
     print("=" * 70 + "\n")
     
     # Load validation data
@@ -359,12 +368,17 @@ def main():
     if args.model:
         # Validate specific model
         if not os.path.exists(args.model):
-            print(f"❌ Model not found: {args.model}")
+            print(f"[ERROR] Model not found: {args.model}")
             return
         
         model, metadata, minority_class = load_model_with_json_metadata(args.model)
         if model is None:
             return
+        
+        # Override threshold if provided
+        if args.threshold is not None:
+            metadata['performance']['optimal_threshold'] = args.threshold
+            print(f"[INFO] Using custom threshold: {args.threshold}")
         
         results = [validate_single_model(model, metadata, minority_class, X_val, y_val)]
         
@@ -384,14 +398,14 @@ def main():
             enhanced_dir = os.path.join(BASE_DIR, "models", "random_forest")
         
         if not os.path.exists(enhanced_dir):
-            print(f"❌ Model directory not found: {enhanced_dir}")
+            print(f"[ERROR] Model directory not found: {enhanced_dir}")
             return
         
         model_files = [f for f in os.listdir(enhanced_dir) 
                       if f.endswith('.pkl') and f.startswith('rf_enhanced')]
         
         if not model_files:
-            print("❌ No trained models found")
+            print("[WARNING] No enhanced models found")
             return
         
         latest_model = sorted(model_files)[-1]
@@ -401,6 +415,11 @@ def main():
         if model is None:
             return
         
+        # Override threshold if provided
+        if args.threshold is not None:
+            metadata['performance']['optimal_threshold'] = args.threshold
+            print(f"[INFO] Using custom threshold: {args.threshold}")
+        
         results = [validate_single_model(model, metadata, minority_class, X_val, y_val)]
     
     # Save results
@@ -409,20 +428,28 @@ def main():
         df = save_validation_results(results, save_dir, args.dataset)
         
         # Final recommendation
-        print(f"\n🎯 FINAL VALIDATION SUMMARY:")
-        print(f"=" * 50)
+        print(f"\n" + "=" * 50)
+        print("FINAL VALIDATION SUMMARY")
+        print("=" * 50)
         
         if not df.empty:
             best_model = df.iloc[0]
             if best_model['deployment_ready']:
-                print(f"✅ RECOMMENDED FOR DEPLOYMENT: {best_model['model_name']}")
-                print(f"   Detection: {best_model['recall']:.1%}, False Alarms: {best_model['false_positive_rate']:.1%}")
+                print(f"[RECOMMENDED] Model: {best_model['model_name']}")
+                print(f"   Detection Rate: {best_model['recall']:.1%}")
+                print(f"   False Alarm Rate: {best_model['false_positive_rate']:.1%}")
+                print(f"   Business Score: {best_model['business_score']:.3f}")
             else:
-                print(f"⚠️  BEST MODEL NEEDS IMPROVEMENT: {best_model['model_name']}")
-                print(f"   Detection: {best_model['recall']:.1%}, False Alarms: {best_model['false_positive_rate']:.1%}")
+                print(f"[NEEDS IMPROVEMENT] Model: {best_model['model_name']}")
+                print(f"   Detection: {best_model['recall']:.1%} (need >= 70%)")
+                print(f"   False Alarms: {best_model['false_positive_rate']:.1%} (need <= 3%)")
                 print(f"   Try threshold {best_model['suggested_threshold']:.3f} for better balance")
+                
+                if best_model['suggested_threshold'] != best_model['threshold']:
+                    improvement = best_model['suggested_business_score'] - best_model['business_score']
+                    print(f"   Expected improvement: +{improvement:.3f} business score")
     else:
-        print("\n❌ No models were successfully validated")
+        print("\n[ERROR] No models were successfully validated")
 
 if __name__ == "__main__":
     main()

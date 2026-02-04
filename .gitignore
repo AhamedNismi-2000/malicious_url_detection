@@ -1,34 +1,16 @@
-# Python cache and bytecode
+# ML generated files
+models/
+results/
+features/
+
+# Binary files
+*.pkl
+*.npz
+
+# Python cache
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
 
-# Virtual environment
-venv/
-env/
-.venv/
-
-# VS Code settings
-.vscode/
-
-# Data directories
-data/splits/
-data/processed/
-data/raw/
-
-# Features outputs
-features/heuristic/*.npz
-features/heuristic/*.csv
-features/nlp/*.npz
-features/nlp/*.csv
-features/nlp+heuristic/*.npz
-features/nlp+heuristic/*.csv
-features/*/vectorizers/
-
-# Logs
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
+data/
+*.csv
+*.json
