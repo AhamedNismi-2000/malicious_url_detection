@@ -1,0 +1,55 @@
+{
+  "training_date": "20260605_144313",
+  "model_path": "d:\\Research Project\\Research_Working _dir_2\\malicious_url_detection\\models\\rf_model_20260605_144313.joblib",
+  "threshold": 0.8100000000000005,
+  "n_features": 545,
+  "n_estimators": 300,
+  "rf_params": {
+    "n_estimators": 300,
+    "max_depth": 30,
+    "min_samples_split": 20,
+    "min_samples_leaf": 8,
+    "max_features": "sqrt",
+    "max_samples": 0.7,
+    "bootstrap": true,
+    "n_jobs": -1,
+    "random_state": 42,
+    "class_weight": {
+      "0": 1.0,
+      "1": 2.0
+    }
+  },
+  "val_metrics": {
+    "split": "VAL",
+    "threshold": 0.8100000000000005,
+    "accuracy": 0.9671,
+    "precision": 0.9664,
+    "recall": 0.8036,
+    "f1": 0.8775,
+    "auc": 0.9931,
+    "tp": 29463,
+    "tn": 212481,
+    "fp": 1023,
+    "fn": 7200,
+    "fpr": 0.0048,
+    "fnr": 0.1964
+  },
+  "test_metrics": {
+    "split": "TEST",
+    "threshold": 0.8100000000000005,
+    "accuracy": 0.9676,
+    "precision": 0.9662,
+    "recall": 0.807,
+    "f1": 0.8795,
+    "auc": 0.9932,
+    "tp": 29586,
+    "tn": 212471,
+    "fp": 1034,
+    "fn": 7076,
+    "fpr": 0.0048,
+    "fnr": 0.193
+  },
+  "train_samples": 513180,
+  "val_samples": 249736,
+  "test_samples": 249737
+}
