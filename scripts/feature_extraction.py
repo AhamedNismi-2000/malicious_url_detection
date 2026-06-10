@@ -9,11 +9,13 @@ Split-aware pipeline:
   - StandardScaler fitted on TRAIN only, transforms val+test
   - No data leakage of any kind
 
-Feature breakdown (total: 545):
+Feature breakdown (total: 548):
   - Heuristic + Obfuscation : 45  (39 structural + 6 obfuscation)
+  - NEW rule-based features  :  3  (brand_in_domain, leet_in_domain,
+                                    brand_hyphen_suspicious)
   - Char n-gram TF-IDF      : 300
   - Word n-gram TF-IDF      : 200
-  Total                     : 545
+  Total                     : 548
 
 Output:
   features/features_train.npz
@@ -89,7 +91,7 @@ MAX_FEAT_CHAR = 300
 MAX_FEAT_WORD = 200
 NGRAM_CHAR    = (2, 4)
 NGRAM_WORD    = (1, 2)
-MIN_DF        = 3        # lowered from 5 — smaller dataset now
+MIN_DF        = 3
 CHUNK_SIZE    = 50_000
 
 # ---------------- CONSTANTS ----------------
@@ -131,12 +133,32 @@ BRANDS = {
     "citi", "bank", "pay", "secure"
 }
 
+# Real brand registered domains — used by brand_in_domain feature
+REAL_BRAND_DOMAINS = {
+    "paypal.com", "amazon.com", "microsoft.com", "apple.com",
+    "google.com", "facebook.com", "netflix.com", "bankofamerica.com",
+    "wellsfargo.com", "whatsapp.com", "instagram.com", "twitter.com",
+    "linkedin.com", "ebay.com", "visa.com", "mastercard.com",
+    "chase.com", "citibank.com", "amazon.co.uk", "amazon.de",
+    "amazon.fr", "amazon.in", "microsoftonline.com", "live.com",
+    "outlook.com", "office.com", "icloud.com", "amazonaws.com"
+}
+
+# Suspicious words used with brand hyphen pattern
+BRAND_SUSPICIOUS_WORDS = {
+    "security", "alert", "verify", "update", "login",
+    "signin", "secure", "confirm", "account", "banking",
+    "support", "help", "service", "center", "care",
+    "warning", "suspend", "locked", "unlock", "recover"
+}
+
 COMMON_PORTS = {80, 443, 8080, 8443, 3000, 5000, 8000, 9000}
 
 EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=None)
 
-# 45 feature names — must stay in sync with extract_heuristic_features()
+# 48 feature names — must stay in sync with extract_heuristic_features()
 HEURISTIC_FEATURE_NAMES = [
+    # Original 39 structural features
     "url_len", "path_len", "num_dots", "path_dots", "num_hyphens",
     "num_underscores", "num_at", "num_qmark", "num_equal", "num_amp",
     "num_percent", "num_digits", "num_letters", "num_subdirs", "num_frag",
@@ -146,10 +168,16 @@ HEURISTIC_FEATURE_NAMES = [
     "tld_len", "risky_tld", "https_flag", "shortened", "sus_words",
     "brand_mismatch", "puny", "susp_ext", "suspicious_port",
     "max_consonants", "max_vowels", "max_digits",
+    # 6 obfuscation features
     "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
-    "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity"
+    "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
+    # NEW: 3 rule-based features
+    "brand_in_domain",         # brand in registered domain but not real brand
+    "leet_in_domain",          # leet speak digit in domain part only
+    "brand_hyphen_suspicious"  # brand-word or word-brand pattern
 ]
-N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 45
+
+N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 48
 
 
 # ================================================================
@@ -225,16 +253,15 @@ def max_repeating(s: str) -> int:
 
 def detect_leet_speak(url: str) -> float:
     """
-    Flag leet speak only when digits appear inside alphabetic word
-    boundaries on the domain. Avoids false positives on paths like
-    /404 or filenames like setup64.exe.
+    Flag leet speak only when digits appear inside alphabetic
+    word boundaries on the domain.
+    Avoids false positives on paths like /404 or mp4.
     """
     url_lower = url.lower()
     try:
         domain_part = urlparse(url_lower).netloc
     except Exception:
         domain_part = url_lower
-
     leet_map = {
         "4": "a", "3": "e", "1": "i",
         "0": "o", "5": "s", "7": "t"
@@ -301,11 +328,7 @@ def detect_subdomain_spam(url: str) -> float:
 
 
 def calc_visual_similarity(url: str, hostname: str) -> float:
-    """
-    FIX: Brand appears in URL path/query but NOT in hostname.
-    Legitimate brand domains (paypal.com, google.com) score 0.0.
-    Impersonation in path (evil.com/paypal/login) scores 0.9.
-    """
+    """Brand in path/query but NOT in hostname → suspicious."""
     url_lower  = url.lower()
     host_lower = hostname.lower()
     max_sim    = 0.0
@@ -316,11 +339,80 @@ def calc_visual_similarity(url: str, hostname: str) -> float:
 
 
 # ================================================================
-# HEURISTIC FEATURE EXTRACTION
+# NEW RULE-BASED FEATURES
+# ================================================================
+
+def brand_in_registered_domain(registered_domain: str) -> float:
+    """
+    Brand appears in registered domain but it is NOT
+    the actual real brand domain.
+
+    paypal-security.com  → paypal in domain, not paypal.com → 1.0
+    amaz0n-prime.com     → amazon not in domain (leet) → 0.0 (leet handles)
+    paypal.com           → IS the real domain → 0.0
+    accounts.google.com  → registered = google.com → 0.0
+
+    This catches: paypal-alert.com, microsoft-update.net etc.
+    """
+    rd = (registered_domain or "").lower()
+    for brand in BRANDS:
+        if brand in rd:
+            # Check if it is a known real brand domain
+            if rd in REAL_BRAND_DOMAINS:
+                return 0.0   # legitimate brand domain
+            else:
+                return 1.0   # brand in domain but not the real domain
+    return 0.0
+
+
+def leet_in_domain_only(domain: str) -> float:
+    """
+    Check leet speak in the domain name only (not path or query).
+    Stronger and more targeted than the general leet_speak_score.
+
+    amaz0n  → z0n matches [a-z]0[a-z] → 1.0
+    paypa1  → a1.c matches [a-z]1[a-z] → 1.0
+    faceb00k → b0o matches → 1.0
+    mp4     → p4 no letter after → 0.0
+    404     → no letter before → 0.0
+    """
+    domain_lower = (domain or "").lower()
+    leet_map = {
+        "4": "a", "3": "e", "1": "i",
+        "0": "o", "5": "s", "7": "t"
+    }
+    for digit in leet_map:
+        pattern = rf"[a-z]{re.escape(digit)}[a-z]"
+        if re.search(pattern, domain_lower):
+            return 1.0
+    return 0.0
+
+
+def brand_hyphen_suspicious_word(url: str) -> float:
+    """
+    Brand name combined with suspicious word via hyphen in URL.
+
+    paypal-security-alert.com → paypal + security → 1.0
+    microsoft-update.com      → microsoft + update → 1.0
+    my-paypal-login.net       → paypal + login → 1.0
+    paypal.com/security       → paypal IS the domain, path is fine → 0.0
+    """
+    url_lower = url.lower()
+    for brand in BRANDS:
+        for word in BRAND_SUSPICIOUS_WORDS:
+            if f"{brand}-{word}" in url_lower:
+                return 1.0
+            if f"{word}-{brand}" in url_lower:
+                return 1.0
+    return 0.0
+
+
+# ================================================================
+# MAIN FEATURE EXTRACTION
 # ================================================================
 
 def extract_heuristic_features(url: str) -> list:
-    """Extract all 45 heuristic + obfuscation features for one URL."""
+    """Extract all 48 heuristic + obfuscation + rule features."""
     try:
         if not isinstance(url, str) or len(url) < 5:
             return [0.0] * N_HEURISTIC
@@ -402,7 +494,7 @@ def extract_heuristic_features(url: str) -> list:
         except Exception:
             pass
 
-        # Obfuscation features — computed ONCE here only
+        # Obfuscation features (6)
         leet       = detect_leet_speak(url)
         homoglyph  = detect_homoglyph(url)
         enc_ratio  = calc_encoding_ratio(url)
@@ -410,19 +502,29 @@ def extract_heuristic_features(url: str) -> list:
         sub_spam   = detect_subdomain_spam(url)
         visual_sim = calc_visual_similarity(url, hostname)
 
+        # NEW: Rule-based features (3)
+        brand_in_dom    = brand_in_registered_domain(domain)
+        leet_dom        = leet_in_domain_only(ext.domain or "")
+        brand_hyp_susp  = brand_hyphen_suspicious_word(url)
+
         return [
+            # 39 structural features
             float(url_len), float(path_length), float(num_dots),
-            float(path.count(".")), float(num_hyphens), float(num_underscores),
-            float(num_at), float(num_qmark), float(num_equal), float(num_amp),
-            float(num_percent), float(num_digits), float(num_letters),
-            float(num_subdirs), float(num_frag), float(num_special),
-            float(num_rep), float(num_upper), float(num_non_ascii),
-            float(num_slashes), float(num_params), ratio_digits, ratio_letters,
+            float(path.count(".")), float(num_hyphens),
+            float(num_underscores), float(num_at), float(num_qmark),
+            float(num_equal), float(num_amp), float(num_percent),
+            float(num_digits), float(num_letters), float(num_subdirs),
+            float(num_frag), float(num_special), float(num_rep),
+            float(num_upper), float(num_non_ascii), float(num_slashes),
+            float(num_params), ratio_digits, ratio_letters,
             url_entropy, ip_flag, float(subdomain_parts_count),
             has_multi_subdomain, float(tld_len), risky_tld, https_flag,
             shortened, sus_words, brand_mismatch, puny, susp_ext,
             suspicious_port, max_cons, max_vows, max_digs,
-            leet, homoglyph, enc_ratio, punycode, sub_spam, visual_sim
+            # 6 obfuscation features
+            leet, homoglyph, enc_ratio, punycode, sub_spam, visual_sim,
+            # 3 new rule-based features
+            brand_in_dom, leet_dom, brand_hyp_susp
         ]
 
     except Exception:
@@ -430,7 +532,6 @@ def extract_heuristic_features(url: str) -> list:
 
 
 def extract_heuristic_chunk(urls_chunk: list) -> list:
-    """Wrapper for multiprocessing pool."""
     return [extract_heuristic_features(u) for u in urls_chunk]
 
 
@@ -438,8 +539,8 @@ def extract_heuristic_batch(urls: list) -> np.ndarray:
     n_workers = min(cpu_count(), 8)
     chunks    = [urls[i:i + CHUNK_SIZE]
                  for i in range(0, len(urls), CHUNK_SIZE)]
-
     all_features = []
+
     if len(urls) > 100_000:
         logger.info(f"   Using {n_workers} workers for heuristic extraction")
         with Pool(n_workers) as pool:
@@ -463,7 +564,6 @@ def extract_heuristic_batch(urls: list) -> np.ndarray:
 # ================================================================
 
 def preprocess_url_for_nlp(url: str) -> str:
-    """Minimal cleanup for NLP tokenization."""
     url = str(url).strip().lower()
     url = re.sub(r"^https?://(www\.)?", "", url)
     url = url.rstrip("/")
@@ -472,10 +572,6 @@ def preprocess_url_for_nlp(url: str) -> str:
 
 
 def fit_vectorizers(train_urls: list):
-    """
-    Fit TF-IDF vectorizers on TRAINING URLs ONLY.
-    Returns fitted char_vec and word_vec.
-    """
     logger.info("   Preprocessing URLs for NLP...")
     processed = [preprocess_url_for_nlp(u)
                  for u in tqdm(train_urls, desc="NLP preprocess")]
@@ -509,7 +605,6 @@ def fit_vectorizers(train_urls: list):
 def transform_nlp(urls: list,
                   char_vec: TfidfVectorizer,
                   word_vec: TfidfVectorizer) -> sp.csr_matrix:
-    """Transform URLs using already-fitted vectorizers."""
     processed = [preprocess_url_for_nlp(u)
                  for u in tqdm(urls, desc="NLP transform")]
     X_char = char_vec.transform(processed)
@@ -523,7 +618,6 @@ def transform_nlp(urls: list,
 
 def combine_features(heuristic_arr: np.ndarray,
                      nlp_sparse: sp.csr_matrix) -> sp.csr_matrix:
-    """Combine heuristic (dense) and NLP (sparse) into one sparse matrix."""
     heuristic_sparse = sp.csr_matrix(heuristic_arr)
     return sp.hstack([heuristic_sparse, nlp_sparse],
                      format="csr").astype(np.float32)
@@ -531,7 +625,6 @@ def combine_features(heuristic_arr: np.ndarray,
 
 def save_features(path: str, X: sp.csr_matrix,
                   y: np.ndarray, feature_names: list):
-    """Save sparse feature matrix + labels to NPZ."""
     X_csr = X.tocsr()
     np.savez_compressed(
         path,
@@ -552,22 +645,8 @@ def save_features(path: str, X: sp.csr_matrix,
     )
 
 
-def load_features(path: str):
-    """Load feature NPZ saved by save_features."""
-    if not path.endswith(".npz"):
-        path = path + ".npz"
-    data = np.load(path, allow_pickle=True)
-    X    = sp.csr_matrix(
-        (data["data"], data["indices"], data["indptr"]),
-        shape=tuple(data["shape"])
-    )
-    y             = data["labels"].astype(int)
-    feature_names = list(data["feature_names"])
-    return X, y, feature_names
-
-
 # ================================================================
-# MAIN
+# PROCESS ONE SPLIT
 # ================================================================
 
 def process_split(name: str, path: str,
@@ -577,11 +656,6 @@ def process_split(name: str, path: str,
                   feature_names: list,
                   out_path: str,
                   fit_scaler: bool = False):
-    """
-    Full feature extraction pipeline for one split.
-    fit_scaler=True ONLY for train split.
-    Val and test use transform only — no fitting.
-    """
     logger.info(f"\n{'='*60}")
     logger.info(f"Processing {name} split: {path}")
     logger.info(f"{'='*60}")
@@ -596,14 +670,14 @@ def process_split(name: str, path: str,
     logger.info(f"   Labels — Benign: {label_counts[0]:,} | "
                 f"Malicious: {label_counts[1]:,}")
 
-    # 1. Heuristic features
+    # 1. Heuristic features (48)
     logger.info("   Extracting heuristic features...")
     heuristic_arr = extract_heuristic_batch(urls)
     logger.info(f"   Heuristic shape: {heuristic_arr.shape}")
 
     # 2. Scale — fit on train only
     if fit_scaler:
-        logger.info("   Fitting scaler on TRAIN heuristic features only...")
+        logger.info("   Fitting scaler on TRAIN only...")
         scaler.fit(heuristic_arr)
         joblib.dump(scaler, SCALER_PATH)
         logger.info(f"   Scaler saved: {SCALER_PATH}")
@@ -618,7 +692,7 @@ def process_split(name: str, path: str,
     logger.info(f"   NLP shape: {nlp_sparse.shape}")
 
     # 4. Combine
-    logger.info("   Combining heuristic + NLP features...")
+    logger.info("   Combining features...")
     X = combine_features(heuristic_scaled, nlp_sparse)
     del heuristic_scaled, nlp_sparse
     gc.collect()
@@ -630,13 +704,17 @@ def process_split(name: str, path: str,
     gc.collect()
 
 
+# ================================================================
+# MAIN
+# ================================================================
+
 def main():
     logger.info("FEATURE EXTRACTION PIPELINE")
     logger.info("=" * 60)
+    logger.info("Total features: 548 (45 heuristic + 3 new + 500 NLP)")
     logger.info("Split-aware: vectorizer and scaler fitted on TRAIN only")
     logger.info("=" * 60)
 
-    # Verify split files exist
     for p in [TRAIN_PATH, VAL_PATH, TEST_PATH]:
         if not os.path.exists(p):
             logger.error(f"Split file not found: {p}")
@@ -651,7 +729,6 @@ def main():
                           + word_feature_names)
     logger.info(f"Total features: {len(feature_names):,}")
 
-    # Initialize scaler
     scaler = StandardScaler()
 
     # Load train URLs to fit vectorizers
@@ -672,23 +749,19 @@ def main():
     del train_urls, df_train
     gc.collect()
 
-    # Process TRAIN — fit scaler here
+    # Process all splits
     process_split(
         name="TRAIN", path=TRAIN_PATH,
         char_vec=char_vec, word_vec=word_vec,
         scaler=scaler, feature_names=feature_names,
         out_path=TRAIN_OUT, fit_scaler=True
     )
-
-    # Process VAL — transform only
     process_split(
         name="VAL", path=VAL_PATH,
         char_vec=char_vec, word_vec=word_vec,
         scaler=scaler, feature_names=feature_names,
         out_path=VAL_OUT, fit_scaler=False
     )
-
-    # Process TEST — transform only
     process_split(
         name="TEST", path=TEST_PATH,
         char_vec=char_vec, word_vec=word_vec,

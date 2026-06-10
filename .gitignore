@@ -13,22 +13,15 @@ env/
 .vscode/
 
 # Data directories
-data/splits/
-data/processed/
-data/raw/
+data/
 
-# Features outputs
-features/heuristic/*.npz
-features/heuristic/*.csv
-features/nlp/*.npz
-features/nlp/*.csv
-features/nlp+heuristic/*.npz
-features/nlp+heuristic/*.csv
-features/*/vectorizers/
 
+features/
 # Logs
 *.log
 
 # OS files
 .DS_Store
 Thumbs.db
+
+models/
