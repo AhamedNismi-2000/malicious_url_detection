@@ -2,23 +2,19 @@
 """
 preprocessing.py
 ----------------
-Loads verified research-grade datasets + data.csv for both classes.
+Loads verified research-grade datasets + synthetic typosquatting URLs.
 
 Sources:
   Malicious:
-    Phish.csv     - PhishTank verified phishing (verified=yes only)
-    urlhaus.txt   - URLhaus malware (abuse.ch verified)
-    openphish.txt - OpenPhish active phishing
-    data.csv      - faizann24 bad URLs (75K malicious with paths)
+    Phish.csv              - PhishTank verified phishing
+    urlhaus.txt            - URLhaus malware
+    openphish.txt          - OpenPhish active phishing
+    data.csv (bad)         - faizann24 malicious URLs with paths
+    synthetic_malicious.csv- Generated typosquatting patterns
 
   Benign:
-    data.csv      - faizann24 good URLs (344K benign with real paths)
-    top-1m.csv    - Alexa top domains (small sample for variety)
-
-Why data.csv for both classes:
-  Bad URLs  : malicious URLs with real paths — fills gap in training
-  Good URLs : benign URLs with real paths, subdomains, query strings
-  Together they teach the model path/subdomain patterns for both classes
+    data.csv (good)        - faizann24 benign URLs with real paths
+    top-1m.csv             - Alexa top domains (small sample)
 
 Output:
   data/processed/cleaned_urls.csv
@@ -37,16 +33,16 @@ RAW_DIR       = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 
-PHISH_PATH     = os.path.join(RAW_DIR, "Phish.csv")
-URLHAUS_PATH   = os.path.join(RAW_DIR, "urlhaus.txt")
-OPENPHISH_PATH = os.path.join(RAW_DIR, "openphish.txt")
-ALEXA_PATH     = os.path.join(RAW_DIR, "top-1m.csv")
-DATA_PATH      = os.path.join(RAW_DIR, "data.csv")
+PHISH_PATH      = os.path.join(RAW_DIR, "Phish.csv")
+URLHAUS_PATH    = os.path.join(RAW_DIR, "urlhaus.txt")
+OPENPHISH_PATH  = os.path.join(RAW_DIR, "openphish.txt")
+ALEXA_PATH      = os.path.join(RAW_DIR, "top-1m.csv")
+DATA_PATH       = os.path.join(RAW_DIR, "data.csv")
+SYNTHETIC_PATH  = os.path.join(RAW_DIR, "synthetic_malicious.csv")
 
 OUTPUT_ML        = os.path.join(PROCESSED_DIR, "cleaned_urls.csv")
 OUTPUT_REFERENCE = os.path.join(PROCESSED_DIR, "cleaned_urls_reference.csv")
 
-# Infrastructure domains to skip from Alexa
 SKIP_DOMAINS = {
     "googletagmanager.com", "doubleclick.net", "googleapis.com",
     "gstatic.com", "cloudflare.com", "akamaized.net",
@@ -86,24 +82,25 @@ def valid_domain(url: str) -> bool:
 def resolve_label_conflicts(df: pd.DataFrame) -> pd.DataFrame:
     diversity     = df.groupby("url")["label"].nunique()
     conflict_urls = diversity[diversity > 1].index
-    n_conflicts   = len(conflict_urls)
-    if n_conflicts > 0:
-        print(f"  Removing {n_conflicts:,} URLs with conflicting labels")
+    n             = len(conflict_urls)
+    if n > 0:
+        print(f"  Removing {n:,} conflicting URLs")
         df = df[~df["url"].isin(conflict_urls)]
     return df.drop_duplicates(subset=["url"]).reset_index(drop=True)
 
 
 def convert_labels(df: pd.DataFrame) -> pd.DataFrame:
     mapping = {
-        "benign"    : 0,
-        "legitimate": 0,
-        "good"      : 0,
-        "safe"      : 0,
-        "malicious" : 1,
-        "phishing"  : 1,
-        "malware"   : 1,
-        "defacement": 1,
-        "bad"       : 1,
+        "benign"             : 0,
+        "legitimate"         : 0,
+        "good"               : 0,
+        "safe"               : 0,
+        "malicious"          : 1,
+        "phishing"           : 1,
+        "malware"            : 1,
+        "defacement"         : 1,
+        "bad"                : 1,
+        "synthetic_malicious": 1,
     }
     df          = df.copy()
     df["label"] = df["label"].str.lower().map(mapping)
@@ -127,7 +124,6 @@ def clean_df(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 
 def add_scheme(url: str) -> str:
-    """Add http:// if URL has no scheme."""
     u = str(url).strip()
     if not u.startswith(("http://", "https://")):
         return "http://" + u
@@ -191,52 +187,59 @@ def load_openphish() -> pd.DataFrame:
 
 
 def load_data_csv_malicious() -> pd.DataFrame:
-    """
-    Load malicious URLs from data.csv (faizann24 dataset).
-    Contains 75K bad URLs with real paths.
-    These fill the gap — malicious URLs with path patterns
-    that PhishTank/URLhaus may not cover.
-    """
     print("Loading data.csv (malicious only)...")
     try:
-        df = pd.read_csv(
-            DATA_PATH,
-            dtype=str,
-            header=None,
-            names=["url", "label"],
-            skiprows=1       # skip duplicate header row
+        df  = pd.read_csv(
+            DATA_PATH, dtype=str,
+            header=None, names=["url", "label"],
+            skiprows=1
         )
         bad = df[df["label"].str.lower() == "bad"].copy()
         bad["label"] = "malicious"
         bad["url"]   = bad["url"].apply(add_scheme)
         bad          = bad.dropna(subset=["url"])
-        print(f"  Loaded: {len(bad):,} malicious URLs with paths")
+        print(f"  Loaded: {len(bad):,}")
         return bad[["url", "label"]]
     except Exception as e:
         print(f"  ERROR: {e}")
         return pd.DataFrame(columns=["url", "label"])
 
 
+def load_synthetic_malicious() -> pd.DataFrame:
+    """
+    Load synthetic typosquatting URLs.
+    Generated by generate_typosquatting.py
+    Covers: brand-word.tld, leet speak, double letter,
+            brand+risky TLD, subdomain abuse patterns.
+    Labeled as 'synthetic_malicious' in reference,
+    mapped to 1 (malicious) in ML training.
+    """
+    print("Loading synthetic_malicious.csv...")
+    try:
+        df = pd.read_csv(SYNTHETIC_PATH, dtype=str)
+        # Label as synthetic_malicious for reference tracking
+        df["label"] = "synthetic_malicious"
+        df = df.dropna(subset=["url"])
+        print(f"  Loaded: {len(df):,} synthetic malicious URLs")
+        return df[["url", "label"]]
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return pd.DataFrame(columns=["url", "label"])
+
+
 def load_data_csv_benign() -> pd.DataFrame:
-    """
-    Load benign URLs from data.csv (faizann24 dataset).
-    Contains 344K good URLs with real paths and subdomains.
-    This is the primary benign source — has structural variety.
-    """
     print("Loading data.csv (benign only)...")
     try:
-        df = pd.read_csv(
-            DATA_PATH,
-            dtype=str,
-            header=None,
-            names=["url", "label"],
+        df   = pd.read_csv(
+            DATA_PATH, dtype=str,
+            header=None, names=["url", "label"],
             skiprows=1
         )
         good = df[df["label"].str.lower() == "good"].copy()
         good["label"] = "benign"
         good["url"]   = good["url"].apply(add_scheme)
         good          = good.dropna(subset=["url"])
-        print(f"  Loaded: {len(good):,} benign URLs with paths")
+        print(f"  Loaded: {len(good):,}")
         return good[["url", "label"]]
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -244,17 +247,11 @@ def load_data_csv_benign() -> pd.DataFrame:
 
 
 def load_alexa(n: int) -> pd.DataFrame:
-    """
-    Load top N Alexa domains as benign.
-    Small sample for variety — bare domain format.
-    """
-    print(f"Loading top-1m.csv (top {n:,} for variety)...")
+    print(f"Loading top-1m.csv (top {n:,})...")
     try:
         df = pd.read_csv(
-            ALEXA_PATH,
-            dtype=str,
-            header=None,
-            names=["rank", "domain"],
+            ALEXA_PATH, dtype=str,
+            header=None, names=["rank", "domain"],
             nrows=n
         )
         df["domain"] = df["domain"].str.strip().str.lower()
@@ -271,20 +268,22 @@ def load_alexa(n: int) -> pd.DataFrame:
 # ---------------- MAIN ----------------
 def main():
     print("=" * 60)
-    print("PREPROCESSING — FULL VERIFIED PIPELINE")
+    print("PREPROCESSING — FULL VERIFIED + SYNTHETIC PIPELINE")
     print("=" * 60)
-    print("Malicious: PhishTank + URLhaus + OpenPhish + data.csv bad")
-    print("Benign   : data.csv good (real paths) + Alexa (variety)")
+    print("Malicious: PhishTank + URLhaus + OpenPhish")
+    print("         + data.csv bad + synthetic typosquatting")
+    print("Benign   : data.csv good + Alexa sample")
     print("=" * 60)
 
-    # Step 1 — Load all malicious sources
+    # Step 1 — Load all malicious
     print("\nStep 1: Loading malicious datasets...")
     malicious = pd.concat(
         [
             load_phishtank(),
             load_urlhaus(),
             load_openphish(),
-            load_data_csv_malicious()   # NEW — adds path variety
+            load_data_csv_malicious(),
+            load_synthetic_malicious()   # NEW synthetic patterns
         ],
         ignore_index=True
     )
@@ -292,16 +291,14 @@ def main():
     n_malicious = len(malicious)
     print(f"\n  Total malicious: {n_malicious:,}")
 
-    # Step 2 — Load benign sources
+    # Step 2 — Load benign
     print(f"\nStep 2: Loading benign datasets...")
     data_benign = load_data_csv_benign()
     data_benign = clean_df(data_benign, "data.csv benign")
 
-    # Small Alexa sample for variety (bare domains)
     alexa = load_alexa(n=20000)
     alexa = clean_df(alexa, "alexa benign")
 
-    # Combine benign
     benign = pd.concat([data_benign, alexa], ignore_index=True)
     benign = benign.drop_duplicates(
         subset=["url"]
@@ -321,23 +318,23 @@ def main():
     print(f"  Final benign   : {len(benign):,}")
 
     # Step 3 — Combine
-    print("\nStep 3: Combining all datasets...")
+    print("\nStep 3: Combining...")
     combined = pd.concat([malicious, benign], ignore_index=True)
     print(f"  Combined total: {len(combined):,}")
 
-    # Step 4 — Resolve label conflicts
+    # Step 4 — Resolve conflicts
     print("\nStep 4: Resolving label conflicts...")
     combined = resolve_label_conflicts(combined)
     print(f"  After conflicts: {len(combined):,}")
 
-    # Step 5 — Save reference (string labels)
+    # Step 5 — Reference file (string labels)
     reference_df = combined.copy()
 
     # Step 6 — Convert labels to numeric
     print("\nStep 5: Converting labels to numeric...")
     ml_df = convert_labels(combined)
 
-    # Step 7 — Shuffle both consistently
+    # Step 7 — Shuffle
     ml_df = ml_df.sample(
         frac=1, random_state=42
     ).reset_index(drop=True)
@@ -346,11 +343,11 @@ def main():
     ).reset_index(drop=True)
 
     # Step 8 — Save
-    print("\nStep 6: Saving files...")
+    print("\nStep 6: Saving...")
     ml_df.to_csv(OUTPUT_ML, index=False, encoding="utf-8")
     reference_df.to_csv(OUTPUT_REFERENCE, index=False, encoding="utf-8")
 
-    # Step 9 — Report
+    # Report
     print("\n" + "=" * 60)
     print("PREPROCESSING COMPLETE")
     print("=" * 60)
@@ -367,14 +364,15 @@ def main():
 
     print(f"\nMalicious breakdown:")
     ref_counts = reference_df["label"].value_counts()
-    for lbl in ["phishing", "malware", "malicious"]:
+    for lbl in ["phishing", "malware", "malicious",
+                "synthetic_malicious"]:
         n = ref_counts.get(lbl, 0)
         if n > 0:
-            print(f"  {lbl:<12}: {n:>8,}")
+            print(f"  {lbl:<22}: {n:>8,}")
 
     print(f"\nBenign breakdown:")
-    print(f"  data.csv good: {len(data_benign):>8,}  (real paths)")
-    print(f"  Alexa        : {len(alexa):>8,}  (bare domains)")
+    print(f"  data.csv good  : {len(data_benign):>8,}")
+    print(f"  Alexa          : {len(alexa):>8,}")
 
     print(f"\nOutput: {OUTPUT_ML}")
     print("Next  : python scripts/split.py")
