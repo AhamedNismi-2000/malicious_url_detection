@@ -1,133 +1,132 @@
-2026-06-10 07:00:08,205 - INFO - RANDOM FOREST TRAINING
-2026-06-10 07:00:08,206 - INFO - ============================================================
-2026-06-10 07:00:08,206 - INFO - Dataset: 137,470 verified URLs (50/50 balanced)
-2026-06-10 07:00:08,206 - INFO - Train : 96,228  x 545 features
-2026-06-10 07:00:08,206 - INFO - Val   : 20,621  x 545 features
-2026-06-10 07:00:08,206 - INFO - Test  : 20,621  x 545 features
-2026-06-10 07:00:08,206 - INFO - ============================================================
-2026-06-10 07:00:08,206 - INFO - 
+2026-06-12 11:23:50,454 - INFO - RANDOM FOREST TRAINING
+2026-06-12 11:23:50,454 - INFO - ============================================================
+2026-06-12 11:23:50,454 - INFO - Dataset: 137,470 verified URLs (50/50 balanced)
+2026-06-12 11:23:50,454 - INFO - Train : 96,228  x 545 features
+2026-06-12 11:23:50,454 - INFO - Val   : 20,621  x 545 features
+2026-06-12 11:23:50,454 - INFO - Test  : 20,621  x 545 features
+2026-06-12 11:23:50,455 - INFO - ============================================================
+2026-06-12 11:23:50,455 - INFO - 
 Loading feature files...
-2026-06-10 07:00:08,207 - INFO -    Loading features_train.npz...
-2026-06-10 07:00:08,408 - INFO -    Shape: (178138, 548)  |  Benign: 89,069  Malicious: 89,069
-2026-06-10 07:00:08,409 - INFO -    Loading features_val.npz...
-2026-06-10 07:00:08,463 - INFO -    Shape: (38173, 548)  |  Benign: 19,086  Malicious: 19,087
-2026-06-10 07:00:08,463 - INFO -    Loading features_test.npz...
-2026-06-10 07:00:08,517 - INFO -    Shape: (38173, 548)  |  Benign: 19,087  Malicious: 19,086
-2026-06-10 07:00:08,517 - INFO - 
+2026-06-12 11:23:50,455 - INFO -    Loading features_train.npz...
+2026-06-12 11:23:50,674 - INFO -    Shape: (184678, 548)  |  Benign: 92,339  Malicious: 92,339
+2026-06-12 11:23:50,674 - INFO -    Loading features_val.npz...
+2026-06-12 11:23:50,723 - INFO -    Shape: (39575, 548)  |  Benign: 19,787  Malicious: 19,788
+2026-06-12 11:23:50,723 - INFO -    Loading features_test.npz...
+2026-06-12 11:23:50,771 - INFO -    Shape: (39575, 548)  |  Benign: 19,788  Malicious: 19,787
+2026-06-12 11:23:50,771 - INFO - 
 Feature count consistent: 548
-2026-06-10 07:00:08,517 - INFO - 
+2026-06-12 11:23:50,772 - INFO - 
 Training Random Forest...
-2026-06-10 07:00:08,517 - INFO -    Samples      : 178,138
-2026-06-10 07:00:08,517 - INFO -    Features     : 548
-2026-06-10 07:00:08,518 - INFO -    Trees        : 300
-2026-06-10 07:00:08,518 - INFO -    Max depth    : 25
-2026-06-10 07:00:08,518 - INFO -    Class weight : None
-2026-06-10 07:05:04,396 - INFO -    Training time: 4.9 minutes
-2026-06-10 07:05:04,397 - INFO -    Trees built  : 300
-2026-06-10 07:05:04,497 - INFO - 
+2026-06-12 11:23:50,772 - INFO -    Samples      : 184,678
+2026-06-12 11:23:50,772 - INFO -    Features     : 548
+2026-06-12 11:23:50,772 - INFO -    Trees        : 300
+2026-06-12 11:23:50,772 - INFO -    Max depth    : 25
+2026-06-12 11:23:50,772 - INFO -    Class weight : None
+2026-06-12 11:28:45,872 - INFO -    Training time: 4.9 minutes
+2026-06-12 11:28:45,872 - INFO -    Trees built  : 300
+2026-06-12 11:28:45,925 - INFO - 
 Feature importances:
-2026-06-10 07:05:04,645 - INFO - 
+2026-06-12 11:28:45,991 - INFO - 
    Top 20 most important features:
-2026-06-10 07:05:04,645 - INFO -     Rank                             Feature   Importance
-2026-06-10 07:05:04,646 - INFO -        1                          https_flag       0.0821
-2026-06-10 07:05:04,646 - INFO -        2                      max_consonants       0.0705
-2026-06-10 07:05:04,646 - INFO -        3                            path_len       0.0292
-2026-06-10 07:05:04,646 - INFO -        4                          num_digits       0.0221
-2026-06-10 07:05:04,646 - INFO -        5                             tld_len       0.0209
-2026-06-10 07:05:04,647 - INFO -        6                         url_entropy       0.0199
-2026-06-10 07:05:04,647 - INFO -        7                             char_92       0.0191
-2026-06-10 07:05:04,647 - INFO -        8                             char_19       0.0183
-2026-06-10 07:05:04,647 - INFO -        9                             char_18       0.0171
-2026-06-10 07:05:04,647 - INFO -       10                             char_90       0.0163
-2026-06-10 07:05:04,647 - INFO -       11                            char_181       0.0155
-2026-06-10 07:05:04,647 - INFO -       12                       num_repeating       0.0150
-2026-06-10 07:05:04,648 - INFO -       13                            char_215       0.0144
-2026-06-10 07:05:04,648 - INFO -       14                             char_17       0.0143
-2026-06-10 07:05:04,648 - INFO -       15                          max_digits       0.0142
-2026-06-10 07:05:04,648 - INFO -       16                             char_28       0.0137
-2026-06-10 07:05:04,649 - INFO -       17                        ratio_digits       0.0137
-2026-06-10 07:05:04,649 - INFO -       18                         num_slashes       0.0136
-2026-06-10 07:05:04,649 - INFO -       19                            num_dots       0.0134
-2026-06-10 07:05:04,649 - INFO -       20                             url_len       0.0120
-2026-06-10 07:05:04,649 - INFO - 
-   264 features cover 95% of decisions (out of 548)
-2026-06-10 07:05:04,650 - INFO - 
+2026-06-12 11:28:45,991 - INFO -     Rank                             Feature   Importance
+2026-06-12 11:28:45,991 - INFO -        1                          https_flag       0.0696
+2026-06-12 11:28:45,991 - INFO -        2                      max_consonants       0.0626
+2026-06-12 11:28:45,991 - INFO -        3                            path_len       0.0284
+2026-06-12 11:28:45,992 - INFO -        4                             char_91       0.0231
+2026-06-12 11:28:45,992 - INFO -        5                             word_48       0.0212
+2026-06-12 11:28:45,992 - INFO -        6                             tld_len       0.0209
+2026-06-12 11:28:45,992 - INFO -        7                          num_digits       0.0204
+2026-06-12 11:28:45,992 - INFO -        8                             char_19       0.0199
+2026-06-12 11:28:45,992 - INFO -        9                             char_18       0.0170
+2026-06-12 11:28:45,992 - INFO -       10                         url_entropy       0.0169
+2026-06-12 11:28:45,992 - INFO -       11                            char_213       0.0160
+2026-06-12 11:28:45,992 - INFO -       12                             char_17       0.0141
+2026-06-12 11:28:45,993 - INFO -       13                            char_179       0.0136
+2026-06-12 11:28:45,993 - INFO -       14                       num_repeating       0.0133
+2026-06-12 11:28:45,993 - INFO -       15                         num_slashes       0.0130
+2026-06-12 11:28:45,993 - INFO -       16                          max_digits       0.0120
+2026-06-12 11:28:45,993 - INFO -       17                             char_88       0.0117
+2026-06-12 11:28:45,993 - INFO -       18                             url_len       0.0115
+2026-06-12 11:28:45,993 - INFO -       19                        ratio_digits       0.0115
+2026-06-12 11:28:45,993 - INFO -       20                            num_dots       0.0113
+2026-06-12 11:28:45,994 - INFO - 
+   297 features cover 95% of decisions (out of 548)
+2026-06-12 11:28:45,994 - INFO - 
 Tuning threshold on VAL set...
-2026-06-10 07:05:06,302 - INFO -    Best threshold : 0.43
-2026-06-10 07:05:06,302 - INFO -    Best F1 (val)  : 0.9473
-2026-06-10 07:05:06,302 - INFO - 
+2026-06-12 11:28:47,099 - INFO -    Best threshold : 0.44
+2026-06-12 11:28:47,100 - INFO -    Best F1 (val)  : 0.9489
+2026-06-12 11:28:47,100 - INFO - 
    Threshold search (around best):
-2026-06-10 07:05:06,303 - INFO -     Threshold       F1   Recall  Precision
-2026-06-10 07:05:06,303 - INFO -          0.39   0.9446   0.9536     0.9357
-2026-06-10 07:05:06,303 - INFO -          0.40   0.9453   0.9514     0.9393
-2026-06-10 07:05:06,303 - INFO -          0.41   0.9462   0.9498     0.9426
-2026-06-10 07:05:06,304 - INFO -          0.42   0.9472   0.9481     0.9464
-2026-06-10 07:05:06,304 - INFO -          0.43   0.9473   0.9456     0.9490 <-- best
-2026-06-10 07:05:06,304 - INFO -          0.44   0.9473   0.9432     0.9514
-2026-06-10 07:05:06,304 - INFO -          0.45   0.9472   0.9411     0.9535
-2026-06-10 07:05:06,304 - INFO -          0.46   0.9471   0.9385     0.9557
-2026-06-10 07:05:06,304 - INFO -          0.47   0.9471   0.9358     0.9586
-2026-06-10 07:05:06,305 - INFO - 
-Evaluating on VAL (38,173 samples)...
-2026-06-10 07:05:06,926 - INFO - 
-   VAL RESULTS (threshold=0.43)
-2026-06-10 07:05:06,927 - INFO -    =============================================
-2026-06-10 07:05:06,927 - INFO -    Accuracy  : 0.9474
-2026-06-10 07:05:06,927 - INFO -    Precision : 0.9490  (of predicted malicious, how many are)
-2026-06-10 07:05:06,927 - INFO -    Recall    : 0.9456  (of actual malicious, how many caught)
-2026-06-10 07:05:06,927 - INFO -    F1        : 0.9473
-2026-06-10 07:05:06,927 - INFO -    AUC-ROC   : 0.9878
-2026-06-10 07:05:06,927 - INFO - 
+2026-06-12 11:28:47,100 - INFO -     Threshold       F1   Recall  Precision
+2026-06-12 11:28:47,100 - INFO -          0.40   0.9477   0.9486     0.9467
+2026-06-12 11:28:47,101 - INFO -          0.41   0.9481   0.9460     0.9501
+2026-06-12 11:28:47,101 - INFO -          0.42   0.9484   0.9440     0.9530
+2026-06-12 11:28:47,101 - INFO -          0.43   0.9489   0.9417     0.9562
+2026-06-12 11:28:47,101 - INFO -          0.44   0.9489   0.9395     0.9585 <-- best
+2026-06-12 11:28:47,101 - INFO -          0.45   0.9487   0.9367     0.9609
+2026-06-12 11:28:47,101 - INFO -          0.46   0.9488   0.9347     0.9633
+2026-06-12 11:28:47,101 - INFO -          0.47   0.9484   0.9326     0.9648
+2026-06-12 11:28:47,102 - INFO -          0.48   0.9483   0.9306     0.9667
+2026-06-12 11:28:47,102 - INFO - 
+Evaluating on VAL (39,575 samples)...
+2026-06-12 11:28:47,514 - INFO - 
+   VAL RESULTS (threshold=0.44)
+2026-06-12 11:28:47,514 - INFO -    =============================================
+2026-06-12 11:28:47,514 - INFO -    Accuracy  : 0.9494
+2026-06-12 11:28:47,514 - INFO -    Precision : 0.9585  (of predicted malicious, how many are)
+2026-06-12 11:28:47,514 - INFO -    Recall    : 0.9395  (of actual malicious, how many caught)
+2026-06-12 11:28:47,515 - INFO -    F1        : 0.9489
+2026-06-12 11:28:47,515 - INFO -    AUC-ROC   : 0.9882
+2026-06-12 11:28:47,515 - INFO - 
    Confusion Matrix:
-2026-06-10 07:05:06,928 - INFO -    TN=18,117  FP=969
-2026-06-10 07:05:06,928 - INFO -    FN=1,038  TP=18,049
-2026-06-10 07:05:06,928 - INFO - 
-   FPR: 0.0508  (969 legit URLs wrongly blocked)
-2026-06-10 07:05:06,928 - INFO -    FNR: 0.0544  (1,038 malicious URLs missed)
-2026-06-10 07:05:06,928 - WARNING -    WARNING: High FPR (0.0508)
-2026-06-10 07:05:07,050 - INFO - 
-Evaluating on TEST (38,173 samples)...
-2026-06-10 07:05:07,607 - INFO - 
-   TEST RESULTS (threshold=0.43)
-2026-06-10 07:05:07,607 - INFO -    =============================================
-2026-06-10 07:05:07,607 - INFO -    Accuracy  : 0.9461
-2026-06-10 07:05:07,607 - INFO -    Precision : 0.9503  (of predicted malicious, how many are)
-2026-06-10 07:05:07,608 - INFO -    Recall    : 0.9414  (of actual malicious, how many caught)
-2026-06-10 07:05:07,608 - INFO -    F1        : 0.9458
-2026-06-10 07:05:07,608 - INFO -    AUC-ROC   : 0.9871
-2026-06-10 07:05:07,608 - INFO - 
+2026-06-12 11:28:47,515 - INFO -    TN=18,983  FP=804
+2026-06-12 11:28:47,515 - INFO -    FN=1,198  TP=18,590
+2026-06-12 11:28:47,515 - INFO - 
+   FPR: 0.0406  (804 legit URLs wrongly blocked)
+2026-06-12 11:28:47,515 - INFO -    FNR: 0.0605  (1,198 malicious URLs missed)
+2026-06-12 11:28:47,558 - INFO - 
+Evaluating on TEST (39,575 samples)...
+2026-06-12 11:28:47,990 - INFO - 
+   TEST RESULTS (threshold=0.44)
+2026-06-12 11:28:47,990 - INFO -    =============================================
+2026-06-12 11:28:47,990 - INFO -    Accuracy  : 0.9490
+2026-06-12 11:28:47,991 - INFO -    Precision : 0.9561  (of predicted malicious, how many are)
+2026-06-12 11:28:47,991 - INFO -    Recall    : 0.9411  (of actual malicious, how many caught)
+2026-06-12 11:28:47,991 - INFO -    F1        : 0.9486
+2026-06-12 11:28:47,991 - INFO -    AUC-ROC   : 0.9880
+2026-06-12 11:28:47,991 - INFO - 
    Confusion Matrix:
-2026-06-10 07:05:07,608 - INFO -    TN=18,148  FP=939
-2026-06-10 07:05:07,608 - INFO -    FN=1,119  TP=17,967
-2026-06-10 07:05:07,608 - INFO - 
-   FPR: 0.0492  (939 legit URLs wrongly blocked)
-2026-06-10 07:05:07,608 - INFO -    FNR: 0.0586  (1,119 malicious URLs missed)
-2026-06-10 07:05:07,677 - INFO - 
+2026-06-12 11:28:47,991 - INFO -    TN=18,934  FP=854
+2026-06-12 11:28:47,991 - INFO -    FN=1,166  TP=18,621
+2026-06-12 11:28:47,991 - INFO - 
+   FPR: 0.0432  (854 legit URLs wrongly blocked)
+2026-06-12 11:28:47,991 - INFO -    FNR: 0.0589  (1,166 malicious URLs missed)
+2026-06-12 11:28:48,036 - INFO - 
 Saving model and metrics...
-2026-06-10 07:05:09,335 - INFO - 
-   Model saved : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260610_070507.joblib
-2026-06-10 07:05:09,335 - INFO -    Model size  : 43.4 MB
-2026-06-10 07:05:11,029 - INFO -    Latest model: d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_latest.joblib
-2026-06-10 07:05:11,030 - INFO -    Threshold   : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\threshold.json
-2026-06-10 07:05:11,031 - INFO -    Metrics     : d:\Research Project\Research_Working _dir_2\malicious_url_detection\results\metrics\rf_metrics_20260610_070507.json
-2026-06-10 07:05:11,031 - INFO - 
+2026-06-12 11:28:49,469 - INFO - 
+   Model saved : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260612_112848.joblib
+2026-06-12 11:28:49,469 - INFO -    Model size  : 40.5 MB
+2026-06-12 11:28:50,878 - INFO -    Latest model: d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_latest.joblib
+2026-06-12 11:28:50,879 - INFO -    Threshold   : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\threshold.json
+2026-06-12 11:28:50,880 - INFO -    Metrics     : d:\Research Project\Research_Working _dir_2\malicious_url_detection\results\metrics\rf_metrics_20260612_112848.json
+2026-06-12 11:28:50,880 - INFO - 
 ============================================================
-2026-06-10 07:05:11,031 - INFO - TRAINING COMPLETE
-2026-06-10 07:05:11,031 - INFO - ============================================================
-2026-06-10 07:05:11,032 - INFO - 
-   Threshold  : 0.43
-2026-06-10 07:05:11,032 - INFO - 
-   VAL  F1    : 0.9473
-2026-06-10 07:05:11,032 - INFO -    VAL  AUC   : 0.9878
-2026-06-10 07:05:11,032 - INFO -    VAL  FPR   : 0.0508
-2026-06-10 07:05:11,032 - INFO -    VAL  FNR   : 0.0544
-2026-06-10 07:05:11,032 - INFO - 
-   TEST F1    : 0.9458
-2026-06-10 07:05:11,033 - INFO -    TEST AUC   : 0.9871
-2026-06-10 07:05:11,033 - INFO -    TEST FPR   : 0.0492
-2026-06-10 07:05:11,033 - INFO -    TEST FNR   : 0.0586
-2026-06-10 07:05:11,033 - INFO - 
-   Val/Test F1 gap = 0.0015 (healthy, no overfitting)
-2026-06-10 07:05:11,033 - INFO - 
-   Model : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260610_070507.joblib
-2026-06-10 07:05:11,033 - INFO -    Next  : run test_model.py
+2026-06-12 11:28:50,880 - INFO - TRAINING COMPLETE
+2026-06-12 11:28:50,881 - INFO - ============================================================
+2026-06-12 11:28:50,881 - INFO - 
+   Threshold  : 0.44
+2026-06-12 11:28:50,881 - INFO - 
+   VAL  F1    : 0.9489
+2026-06-12 11:28:50,881 - INFO -    VAL  AUC   : 0.9882
+2026-06-12 11:28:50,881 - INFO -    VAL  FPR   : 0.0406
+2026-06-12 11:28:50,881 - INFO -    VAL  FNR   : 0.0605
+2026-06-12 11:28:50,881 - INFO - 
+   TEST F1    : 0.9486
+2026-06-12 11:28:50,881 - INFO -    TEST AUC   : 0.9880
+2026-06-12 11:28:50,881 - INFO -    TEST FPR   : 0.0432
+2026-06-12 11:28:50,881 - INFO -    TEST FNR   : 0.0589
+2026-06-12 11:28:50,882 - INFO - 
+   Val/Test F1 gap = 0.0003 (healthy, no overfitting)
+2026-06-12 11:28:50,882 - INFO - 
+   Model : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260612_112848.joblib
+2026-06-12 11:28:50,882 - INFO -    Next  : run test_model.py
