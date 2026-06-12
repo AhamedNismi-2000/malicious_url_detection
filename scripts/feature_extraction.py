@@ -594,7 +594,7 @@ def fit_vectorizers(train_urls: list):
         max_features=MAX_FEAT_WORD,
         min_df=MIN_DF,
         lowercase=False,
-        token_pattern=r"[a-zA-Z0-9@\-\.]+",
+        token_pattern=r"[a-zA-Z0-9@]+",  # FIX: splits on - and . for brand+word patterns
         dtype=np.float32
     )
     word_vec.fit(processed)

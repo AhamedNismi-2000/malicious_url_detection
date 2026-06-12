@@ -14,7 +14,7 @@ env/
 
 # Data directories
 data/
-
+processed/
 
 features/
 # Logs
