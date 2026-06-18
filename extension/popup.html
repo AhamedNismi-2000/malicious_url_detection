@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Detector</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --c-bg        : #0f1117;
+      --c-surface   : #1a1d27;
+      --c-border    : #2a2d3a;
+      --c-text      : #e2e4ec;
+      --c-muted     : #6b7280;
+      --c-mal       : #ef4444;
+      --c-mal-dim   : #7f1d1d;
+      --c-ben       : #22c55e;
+      --c-ben-dim   : #14532d;
+      --c-warn      : #f59e0b;
+      --c-accent    : #818cf8;
+      --radius      : 8px;
+      --font        : "Segoe UI", system-ui, sans-serif;
+    }
+
+    body {
+      width: 340px;
+      min-height: 200px;
+      background: var(--c-bg);
+      color: var(--c-text);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .header svg { flex-shrink: 0; }
+    .header-title { font-weight: 600; font-size: 14px; letter-spacing: .3px; }
+    .header-sub   { font-size: 10px; color: var(--c-muted); margin-top: 1px; }
+    .settings-btn {
+      margin-left: auto;
+      background: none; border: none; cursor: pointer;
+      color: var(--c-muted); padding: 2px;
+      border-radius: 4px; line-height: 0;
+      transition: color .15s;
+    }
+    .settings-btn:hover { color: var(--c-text); }
+
+    /* ── Main card ── */
+    .card {
+      margin: 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--c-border);
+      background: var(--c-surface);
+      overflow: hidden;
+    }
+
+    /* verdict strip */
+    .verdict {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+    }
+    .verdict.malicious { background: rgba(239,68,68,.12); }
+    .verdict.benign    { background: rgba(34,197,94,.10); }
+    .verdict.unknown   { background: rgba(107,114,128,.10); }
+
+    .verdict-icon {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 18px;
+    }
+    .malicious .verdict-icon { background: var(--c-mal-dim); }
+    .benign    .verdict-icon { background: var(--c-ben-dim); }
+    .unknown   .verdict-icon { background: #374151; }
+
+    .verdict-label {
+      font-size: 16px; font-weight: 700; letter-spacing: .5px;
+    }
+    .malicious .verdict-label { color: var(--c-mal); }
+    .benign    .verdict-label { color: var(--c-ben); }
+    .unknown   .verdict-label { color: var(--c-muted); }
+
+    .verdict-sub { font-size: 11px; color: var(--c-muted); margin-top: 2px; }
+
+    /* confidence bar */
+    .conf-row {
+      padding: 8px 14px 10px;
+      border-top: 1px solid var(--c-border);
+    }
+    .conf-labels {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--c-muted); margin-bottom: 5px;
+    }
+    .conf-value { font-weight: 600; color: var(--c-text); }
+    .bar-track {
+      height: 5px; background: var(--c-border);
+      border-radius: 3px; overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%; border-radius: 3px;
+      transition: width .4s ease;
+    }
+    .malicious .bar-fill { background: var(--c-mal); }
+    .benign    .bar-fill { background: var(--c-ben); }
+    .unknown   .bar-fill { background: var(--c-muted); }
+
+    /* URL display */
+    .url-row {
+      padding: 8px 14px 10px;
+      border-top: 1px solid var(--c-border);
+    }
+    .url-label { font-size: 10px; color: var(--c-muted); margin-bottom: 3px; }
+    .url-text {
+      font-size: 11px; color: var(--c-text);
+      word-break: break-all; max-height: 44px; overflow: hidden;
+    }
+
+    /* ── Explanation ── */
+    .explain-section {
+      margin: 0 12px 12px;
+    }
+    .explain-title {
+      font-size: 11px; font-weight: 600; color: var(--c-muted);
+      text-transform: uppercase; letter-spacing: .6px;
+      margin-bottom: 6px; padding-top: 2px;
+    }
+    .explain-list { display: flex; flex-direction: column; gap: 5px; }
+
+    .reason-pill {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      padding: 7px 10px;
+    }
+    .reason-dot {
+      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    }
+    .reason-dot.mal { background: var(--c-mal); }
+    .reason-dot.ben { background: var(--c-ben); }
+    .reason-name { font-weight: 600; font-size: 12px; flex: 1; }
+    .reason-meta { font-size: 10px; color: var(--c-muted); white-space: nowrap; }
+
+    /* loading + error states */
+    .state-msg {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--c-muted);
+      font-size: 13px;
+    }
+    .spinner {
+      width: 24px; height: 24px;
+      border: 2px solid var(--c-border);
+      border-top-color: var(--c-accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Settings panel ── */
+    #settings-panel {
+      display: none;
+      margin: 0 12px 12px;
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    #settings-panel label {
+      font-size: 11px; color: var(--c-muted); display: block; margin-bottom: 4px;
+    }
+    #settings-panel input {
+      width: 100%;
+      background: var(--c-bg);
+      border: 1px solid var(--c-border);
+      border-radius: 5px;
+      color: var(--c-text);
+      font-size: 12px;
+      padding: 6px 8px;
+      outline: none;
+    }
+    #settings-panel input:focus { border-color: var(--c-accent); }
+    .save-btn {
+      margin-top: 8px; width: 100%;
+      background: var(--c-accent); border: none;
+      border-radius: 5px; color: #fff;
+      font-size: 12px; font-weight: 600;
+      padding: 6px; cursor: pointer;
+    }
+    .save-btn:hover { filter: brightness(1.15); }
+
+    /* ── Footer ── */
+    .footer {
+      padding: 6px 14px 8px;
+      border-top: 1px solid var(--c-border);
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: var(--c-muted);
+    }
+    .src-badge {
+      background: var(--c-border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+       stroke="#818cf8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  </svg>
+  <div>
+    <div class="header-title">URL Detector</div>
+    <div class="header-sub">ML-powered malicious URL detection</div>
+  </div>
+  <button class="settings-btn" id="settings-toggle" title="Settings">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Main result card (populated by popup.js) -->
+<div id="main-content">
+  <div class="state-msg">
+    <div class="spinner"></div>
+    Checking URL…
+  </div>
+</div>
+
+<!-- Explanation section (populated by popup.js) -->
+<div id="explain-content"></div>
+
+<!-- Settings panel -->
+<div id="settings-panel">
+  <label for="api-url">API Base URL</label>
+  <input type="text" id="api-url" placeholder="http://localhost:5000" />
+  <button class="save-btn" id="save-settings">Save</button>
+</div>
+
+<!-- Footer -->
+<div class="footer" id="footer-row" style="display:none;">
+  <span>Source:</span>
+  <span class="src-badge" id="src-badge">—</span>
+  <span id="threshold-txt" style="margin-left:auto;"></span>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
