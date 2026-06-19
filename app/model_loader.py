@@ -128,21 +128,20 @@ class URLClassifier:
         return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
     def _feature_vector(self, url: str) -> np.ndarray:
-        """Build the 548-dim scaled feature vector for *url*."""
-        # 48 heuristic features — single URL, returns plain list
+        """Build the 548-dim feature vector for *url*."""
+        # 48 heuristic features — scaler was fitted on these only
         heuristic = np.array(
             extract_heuristic_features(url), dtype=np.float32
-        )  # (48,)
+        ).reshape(1, -1)                                            # (1, 48)
+        heuristic_scaled = self.scaler.transform(heuristic).flatten()  # (48,)
 
-        # 300 + 200 NLP features — vectorizers expect preprocessed URL
+        # 300 + 200 NLP features — unscaled, exactly as during training
         processed  = preprocess_url_for_nlp(url)
         char_dense = self.vec_char.transform([processed]).toarray().flatten()  # (300,)
         word_dense = self.vec_word.transform([processed]).toarray().flatten()  # (200,)
 
-        # Concatenate → scale → return flat (548,)
-        raw    = np.concatenate([heuristic, char_dense, word_dense]).reshape(1, -1)
-        scaled = self.scaler.transform(raw)
-        return scaled.flatten()  # (548,)
+        # Concatenate in training order: heuristic_scaled + char + word
+        return np.concatenate([heuristic_scaled, char_dense, word_dense])  # (548,)
 
     # ── Public: prediction ────────────────────────────────────────────────────
 
