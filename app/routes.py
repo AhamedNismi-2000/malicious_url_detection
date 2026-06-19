@@ -1,80 +1,107 @@
-#!/usr/bin/env python3
 """
 routes.py
 ---------
-API endpoints for the malicious URL detector.
+Flask route definitions for the Malicious URL Detection API.
 
 Endpoints:
-  GET  /                 - health check / info
-  GET  /health           - health check
-  POST /predict          - single URL: {"url": "..."}
-  POST /predict/batch    - multiple URLs: {"urls": ["...", "..."]}
-
-Response format (single):
-  {
-    "url": "...",
-    "prediction": "MALICIOUS" | "BENIGN",
-    "confidence": 0-100,
-    "threshold": 0-100,
-    "source": "whitelist" | "model" | "invalid"
-  }
+  GET  /health          — liveness check
+  GET  /                — API info
+  POST /predict         — classify a single URL
+  POST /predict/batch   — classify up to 500 URLs
+  POST /explain         — classify + LIME explanation for a single URL
 """
 
-from flask import Blueprint, request, jsonify
-from model_loader import classifier
+from flask import Blueprint, jsonify, request
 
-api = Blueprint("api", __name__)
+from model_loader import classifier           # direct import (sys.path set by app.py)
+
+api = Blueprint("api", __name__)             # named `api` to match your convention
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _bad_request(msg: str):
+    return jsonify({"error": msg}), 400
+
+
+def _require_url(data: dict):
+    """Return (url, error_response).  error_response is None on success."""
+    if not data or "url" not in data:
+        return None, _bad_request("Request body must include a 'url' field.")
+    url = data["url"]
+    if not isinstance(url, str) or not url.strip():
+        return None, _bad_request("'url' must be a non-empty string.")
+    return url.strip(), None
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@api.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status"   : "ok",
+        "model"    : "rf_model_latest",
+        "threshold": classifier.threshold,
+    }), 200
 
 
 @api.route("/", methods=["GET"])
 def index():
     return jsonify({
-        "service": "Malicious URL Detector API",
-        "status": "running",
-        "model_info": classifier.info(),
+        "service"  : "Malicious URL Detector",
+        "version"  : "1.0",
         "endpoints": {
-            "health": "GET /health",
-            "predict_single": "POST /predict  {url: string}",
-            "predict_batch": "POST /predict/batch  {urls: [string]}"
-        }
-    })
-
-
-@api.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "model_loaded": True})
+            "GET  /health"        : "Health check",
+            "POST /predict"       : "Classify a single URL",
+            "POST /predict/batch" : "Classify multiple URLs",
+            "POST /explain"       : "Classify + LIME explanation for a single URL",
+        },
+    }), 200
 
 
 @api.route("/predict", methods=["POST"])
 def predict():
-    data = request.get_json(silent=True) or {}
-    url = data.get("url")
-
-    if not url or not isinstance(url, str):
-        return jsonify({
-            "error": "Missing or invalid 'url' field. "
-                     "Expected JSON: {\"url\": \"https://example.com\"}"
-        }), 400
-
-    result = classifier.predict_url(url)
-    return jsonify(result)
+    url, err = _require_url(request.get_json(silent=True) or {})
+    if err:
+        return err
+    return jsonify(classifier.predict_url(url)), 200
 
 
 @api.route("/predict/batch", methods=["POST"])
 def predict_batch():
     data = request.get_json(silent=True) or {}
     urls = data.get("urls")
-
     if not urls or not isinstance(urls, list):
-        return jsonify({
-            "error": "Missing or invalid 'urls' field. "
-                     "Expected JSON: {\"urls\": [\"https://example.com\", ...]}"
-        }), 400
+        return _bad_request("Request body must include a 'urls' list.")
+    if len(urls) > 500:
+        return _bad_request("Batch size limited to 500 URLs per request.")
+    return jsonify({"results": classifier.predict_batch(urls)}), 200
 
-    if len(urls) > 100:
-        return jsonify({
-            "error": "Too many URLs. Maximum 100 per batch request."
-        }), 400
 
-    results = classifier.predict_batch(urls)
-    return jsonify({"results": results, "count": len(results)})
+@api.route("/explain", methods=["POST"])
+def explain():
+    """
+    POST /explain
+    Request  : {"url": "https://example.com", "num_features": 10}
+    Response : {
+        "url"        : "...",
+        "prediction" : "MALICIOUS" | "BENIGN",
+        "confidence" : 87.3,
+        "threshold"  : 44.0,
+        "source"     : "model" | "whitelist" | "invalid",
+        "explanation": [
+            {"feature": "brand_in_domain", "weight": 0.42, "value": 1.0},
+            ...up to num_features entries...
+        ]
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    url, err = _require_url(data)
+    if err:
+        return err
+
+    num_features = int(data.get("num_features", 10))
+    num_features = max(1, min(num_features, 30))   # clamp to 1–30
+
+    result = classifier.explain_url(url, num_features=num_features)
+    return jsonify(result), 200
