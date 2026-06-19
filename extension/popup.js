@@ -7,39 +7,61 @@
 
 const DEFAULT_API = "http://localhost:5000";
 
-// ── Human-readable labels for feature names ───────────────────────────────────
+// ── Human-readable labels for heuristic feature names ────────────────────────
 const FEATURE_LABELS = {
-  brand_in_domain         : "Brand impersonation",
-  leet_in_domain          : "Leet-speak in domain",
-  brand_hyphen_suspicious : "Suspicious brand-hyphen pattern",
-  brand_mismatch          : "Brand–domain mismatch",
-  risky_tld               : "Risky TLD (e.g. .tk, .xyz)",
-  ip_flag                 : "IP address used as host",
+  // Brand / impersonation
+  brand_in_domain         : "Brand impersonation detected",
+  brand_hyphen_suspicious : "Fake brand domain pattern",
+  brand_mismatch          : "Brand used outside real domain",
+  leet_in_domain          : "Disguised brand name (e.g. amaz0n)",
+  visual_brand_similarity : "Visually similar to known brand",
+  homoglyph_suspicious    : "Look-alike characters detected",
+  punycode_suspicious     : "Internationalized domain trick",
+  puny                    : "Punycode domain detected",
+
+  // Domain / TLD
+  risky_tld               : "Suspicious domain ending (.tk .xyz)",
+  ip_flag                 : "IP address used as domain",
   shortened               : "URL shortener detected",
-  sus_words               : "Suspicious keywords",
-  puny                    : "Punycode / IDN domain",
-  punycode_suspicious     : "Suspicious punycode",
-  homoglyph_suspicious    : "Homoglyph character",
-  visual_brand_similarity : "Visual brand similarity",
-  leet_speak_score        : "Leet-speak score",
-  encoding_ratio          : "High encoding ratio",
-  suspicious_port         : "Suspicious port number",
-  subdomain_spam_score    : "Subdomain spam score",
-  has_multi_subdomain     : "Multiple subdomains",
-  susp_ext                : "Suspicious file extension",
+  suspicious_port         : "Unusual port number",
+  has_multi_subdomain     : "Excessive subdomains",
+  subdomain_spam_score    : "Subdomain spam pattern",
+  tld_len                 : "Unusually long domain suffix",
+
+  // URL structure
+  url_len                 : "Unusually long URL",
+  num_hyphens             : "Excessive hyphens in URL",
   num_at                  : "@ symbol in URL",
   num_percent             : "Percent-encoding in URL",
-  num_non_ascii           : "Non-ASCII characters",
-  url_entropy             : "High URL entropy",
-  ratio_digits            : "High digit ratio",
-  url_len                 : "Very long URL",
-  num_hyphens             : "Many hyphens",
-  num_special             : "Many special characters",
-  https_flag              : "HTTPS present",
+  num_non_ascii           : "Non-standard characters in URL",
+  num_special             : "Excessive special characters",
+  url_entropy             : "Randomly generated domain",
+  ratio_digits            : "High proportion of digits",
+  encoding_ratio          : "Heavy URL encoding",
+  susp_ext                : "Suspicious file extension",
+
+  // Content signals
+  sus_words               : "Phishing keywords found",
+  leet_speak_score        : "Leet-speak obfuscation",
+
+  // HTTPS — direction depends on weight sign, handled in render
+  https_flag              : "Missing HTTPS security",
 };
 
-function label(name) {
-  return FEATURE_LABELS[name] || name.replace(/_/g, " ");
+// Features to always hide from the popup (n-gram TF-IDF — not user-readable)
+function isInterpretable(featureName) {
+  return (
+    !featureName.startsWith("char_") &&
+    !featureName.startsWith("word_")
+  );
+}
+
+function friendlyLabel(feature, weight) {
+  // Special case: https_flag with positive weight means HTTP (no HTTPS) is suspicious
+  if (feature === "https_flag") {
+    return weight > 0 ? "Missing HTTPS security" : "HTTPS present (safe signal)";
+  }
+  return FEATURE_LABELS[feature] || feature.replace(/_/g, " ");
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -66,7 +88,7 @@ async function callExplain(url, apiBase) {
   const res = await fetch(`${apiBase}/explain`, {
     method : "POST",
     headers: { "Content-Type": "application/json" },
-    body   : JSON.stringify({ url, num_features: 10 }),
+    body   : JSON.stringify({ url, num_features: 20 }),
   });
   if (!res.ok) throw new Error(`/explain returned HTTP ${res.status}`);
   return res.json();
@@ -144,21 +166,34 @@ function renderExplanation(explanation, prediction) {
     return;
   }
 
-  // Show top 3
-  const top3 = explanation.slice(0, 3);
+  // Filter out n-gram features (char_*, word_*) — not user-readable
+  // Then take top 3 by absolute weight
+  const top3 = explanation
+    .filter(f => isInterpretable(f.feature))
+    .slice(0, 3);
+
+  if (top3.length === 0) {
+    ec.innerHTML = "";
+    return;
+  }
+
   const isMal = prediction === "MALICIOUS";
 
   const items = top3.map(({ feature, weight, value }) => {
     const positive    = weight > 0;
     const dotClass    = positive ? "mal" : "ben";
-    const featureText = label(feature);
-    const valText     = value === 1 ? "detected"
-                      : value === 0 ? "not present"
-                      : `value ${value.toFixed(2)}`;
+    const labelText   = friendlyLabel(feature, weight);
+
+    // Value display — show meaningful context instead of raw numbers
+    let valText;
+    if (value === 1 || value > 0.9)      valText = "detected";
+    else if (value === 0 || value < 0.1) valText = "not present";
+    else                                  valText = `score ${value.toFixed(2)}`;
+
     return `
       <div class="reason-pill">
         <div class="reason-dot ${dotClass}"></div>
-        <div class="reason-name">${escapeHtml(featureText)}</div>
+        <div class="reason-name">${escapeHtml(labelText)}</div>
         <div class="reason-meta">${escapeHtml(valText)}</div>
       </div>`;
   }).join("");
@@ -192,7 +227,6 @@ function escapeHtml(str) {
 // ── Main flow ─────────────────────────────────────────────────────────────────
 
 async function run() {
-  // 1. Get the active tab's URL
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url   = tab?.url;
 
@@ -201,31 +235,31 @@ async function run() {
     return;
   }
 
-  // 2. Check session cache first
-  const cacheKey = `tab_${tab.id}`;
-  let cached;
-  try {
-    const store = await chrome.storage.session.get(cacheKey);
-    cached = store[cacheKey];
-  } catch (_) { /* session storage may not be available */ }
-
   const apiBase = await getApiBase();
 
-  // 3. Use cached prediction if available
-  let prediction = cached;
-  if (!cached || cached.url !== url) {
+  // Check session cache first
+  let prediction;
+  try {
+    const store = await chrome.storage.session.get(`tab_${tab.id}`);
+    const cached = store[`tab_${tab.id}`];
+    if (cached && cached.url === url) {
+      prediction = cached;
+    }
+  } catch (_) {}
+
+  if (!prediction) {
     try {
-      prediction = await callPredict(url, apiBase);
-      prediction.url = url;
+      prediction      = await callPredict(url, apiBase);
+      prediction.url  = url;
     } catch (err) {
-      renderError(`Could not reach API at ${apiBase}.\n${err.message}`);
+      renderError(`Could not reach API at ${apiBase}.\nMake sure Flask is running.`);
       return;
     }
   }
 
   renderCard(prediction);
 
-  // 4. Fetch LIME explanation if model-classified
+  // Fetch LIME explanation for model-classified URLs only
   if (prediction.source === "model") {
     try {
       const explained = await callExplain(url, apiBase);
@@ -239,7 +273,7 @@ async function run() {
 // ── Settings panel ─────────────────────────────────────────────────────────────
 
 document.getElementById("settings-toggle").addEventListener("click", () => {
-  const panel = document.getElementById("settings-panel");
+  const panel   = document.getElementById("settings-panel");
   const visible = panel.style.display === "block";
   panel.style.display = visible ? "none" : "block";
   if (!visible) {
@@ -253,7 +287,6 @@ document.getElementById("save-settings").addEventListener("click", () => {
   const val = document.getElementById("api-url").value.trim() || DEFAULT_API;
   chrome.storage.sync.set({ apiBase: val }, () => {
     document.getElementById("settings-panel").style.display = "none";
-    // Re-run with new API base
     document.getElementById("main-content").innerHTML =
       '<div class="state-msg"><div class="spinner"></div>Checking URL…</div>';
     document.getElementById("explain-content").innerHTML = "";
