@@ -24,15 +24,14 @@ import joblib
 import numpy as np
 
 # ── Locate project root and add scripts/ to path ─────────────────────────────
-# app/model_loader.py  →  project root is one level up
-_APP_DIR  = os.path.dirname(os.path.abspath(__file__))
-_ROOT     = os.path.abspath(os.path.join(_APP_DIR, ".."))
-_SCRIPTS  = os.path.join(_ROOT, "scripts")
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT    = os.path.abspath(os.path.join(_APP_DIR, ".."))
+_SCRIPTS = os.path.join(_ROOT, "scripts")
 
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-from feature_extraction import extract_features   # noqa: E402  (scripts/feature_extraction.py)
+from feature_extraction import extract_heuristic_features, preprocess_url_for_nlp
 
 # ── Path constants ────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(_ROOT, "models")
@@ -60,7 +59,7 @@ FEATURE_NAMES: list[str] = (
     + [f"word_{i}" for i in range(200)]
 )
 
-# Boolean/flag features — LIME should treat these as categorical
+# Boolean/flag features — LIME treats these as categorical
 _CATEGORICAL_FEATURE_NAMES: list[str] = [
     "ip_flag", "has_multi_subdomain", "risky_tld", "https_flag",
     "shortened", "sus_words", "brand_mismatch", "puny", "susp_ext",
@@ -85,12 +84,10 @@ WHITELIST: frozenset[str] = frozenset({
 })
 
 
-# ── URLClassifier (singleton) ──────────────────────────────────────────────────
+# ── URLClassifier (singleton) ─────────────────────────────────────────────────
 
 class URLClassifier:
-    """
-    Thread-safe singleton.  Load artefacts once; serve predictions forever.
-    """
+    """Thread-safe singleton. Load artefacts once; serve predictions forever."""
 
     _instance: Optional["URLClassifier"] = None
     _init_lock = threading.Lock()
@@ -132,11 +129,20 @@ class URLClassifier:
 
     def _feature_vector(self, url: str) -> np.ndarray:
         """Build the 548-dim scaled feature vector for *url*."""
-        heuristic  = extract_features(url)                    # (48,)
-        char_dense = self.vec_char.transform([url]).toarray().flatten()  # (300,)
-        word_dense = self.vec_word.transform([url]).toarray().flatten()  # (200,)
-        raw        = np.concatenate([heuristic, char_dense, word_dense]).reshape(1, -1)
-        return self.scaler.transform(raw).flatten()           # (548,)
+        # 48 heuristic features — single URL, returns plain list
+        heuristic = np.array(
+            extract_heuristic_features(url), dtype=np.float32
+        )  # (48,)
+
+        # 300 + 200 NLP features — vectorizers expect preprocessed URL
+        processed  = preprocess_url_for_nlp(url)
+        char_dense = self.vec_char.transform([processed]).toarray().flatten()  # (300,)
+        word_dense = self.vec_word.transform([processed]).toarray().flatten()  # (200,)
+
+        # Concatenate → scale → return flat (548,)
+        raw    = np.concatenate([heuristic, char_dense, word_dense]).reshape(1, -1)
+        scaled = self.scaler.transform(raw)
+        return scaled.flatten()  # (548,)
 
     # ── Public: prediction ────────────────────────────────────────────────────
 
@@ -144,14 +150,16 @@ class URLClassifier:
         if not url or not isinstance(url, str):
             return {
                 "url": url, "prediction": "BENIGN",
-                "confidence": 0.0, "threshold": round(self.threshold * 100, 2),
+                "confidence": 0.0,
+                "threshold": round(self.threshold * 100, 2),
                 "source": "invalid",
             }
 
         if self._registered_domain(url) in WHITELIST:
             return {
                 "url": url, "prediction": "BENIGN",
-                "confidence": 100.0, "threshold": round(self.threshold * 100, 2),
+                "confidence": 100.0,
+                "threshold": round(self.threshold * 100, 2),
                 "source": "whitelist",
             }
 
@@ -168,7 +176,8 @@ class URLClassifier:
         except Exception as exc:
             return {
                 "url": url, "prediction": "BENIGN",
-                "confidence": 0.0, "threshold": round(self.threshold * 100, 2),
+                "confidence": 0.0,
+                "threshold": round(self.threshold * 100, 2),
                 "source": "invalid", "error": str(exc),
             }
 
@@ -179,7 +188,7 @@ class URLClassifier:
 
     def explain_url(self, url: str, num_features: int = 10) -> dict:
         """
-        Predict + explain.  Returns the standard predict dict plus:
+        Predict + explain. Returns standard predict dict plus:
           "explanation": [{"feature": str, "weight": float, "value": float}, ...]
         Whitelist / invalid URLs return an empty explanation list.
         """
@@ -192,18 +201,19 @@ class URLClassifier:
             fv        = self._feature_vector(url)
 
             exp = explainer.explain_instance(
-                data_row  = fv,
-                predict_fn= self._lime_predict_fn,
+                data_row     = fv,
+                predict_fn   = self._lime_predict_fn,
                 num_features = num_features,
                 top_labels   = 1,
             )
 
-            raw_list = exp.as_list(label=1)   # label 1 = MALICIOUS
+            raw_list = exp.as_list(label=1)  # label 1 = MALICIOUS
 
             explanation = []
             for condition_str, weight in raw_list:
                 feat_name = _parse_lime_feature(condition_str)
-                feat_idx  = FEATURE_NAMES.index(feat_name) if feat_name in FEATURE_NAMES else -1
+                feat_idx  = FEATURE_NAMES.index(feat_name) \
+                            if feat_name in FEATURE_NAMES else -1
                 feat_val  = float(fv[feat_idx]) if feat_idx >= 0 else 0.0
                 explanation.append({
                     "feature": feat_name,
@@ -225,13 +235,15 @@ class URLClassifier:
             return self._explainer
 
         with self._explainer_lock:
-            if self._explainer is not None:   # double-checked
+            if self._explainer is not None:  # double-checked
                 return self._explainer
 
             try:
                 from lime.lime_tabular import LimeTabularExplainer
             except ImportError as exc:
-                raise ImportError("lime is not installed. Run: pip install lime") from exc
+                raise ImportError(
+                    "lime is not installed. Run: pip install lime"
+                ) from exc
 
             bg = self._load_background()
 
@@ -242,13 +254,13 @@ class URLClassifier:
             ]
 
             self._explainer = LimeTabularExplainer(
-                training_data       = bg,
-                feature_names       = FEATURE_NAMES,
-                class_names         = ["BENIGN", "MALICIOUS"],
-                categorical_features= cat_indices,
-                mode                = "classification",
-                discretize_continuous = True,
-                random_state        = 42,
+                training_data        = bg,
+                feature_names        = FEATURE_NAMES,
+                class_names          = ["BENIGN", "MALICIOUS"],
+                categorical_features = cat_indices,
+                mode                 = "classification",
+                discretize_continuous= True,
+                random_state         = 42,
             )
             return self._explainer
 
@@ -265,11 +277,12 @@ class URLClassifier:
         )
 
         import csv, random
-        csv_path = os.path.join(DATA_DIR, "train_urls.csv")
+        csv_path = os.path.join(_ROOT, "data", "splits", "train_urls.csv")
         if not os.path.exists(csv_path):
             raise FileNotFoundError(
-                f"Cannot find {bg_path} or {csv_path}. "
-                "Generate lime_background.npz by running: python scripts/explain.py --save-background"
+                f"Cannot find {bg_path} or {csv_path}.\n"
+                "Run: python -c \"from model_loader import classifier; "
+                "classifier._load_background()\""
             )
 
         with open(csv_path, newline="", encoding="utf-8") as fh:
@@ -297,15 +310,14 @@ class URLClassifier:
 
 def _parse_lime_feature(condition_str: str) -> str:
     """
-    Recover the bare feature name from a LIME condition string.
+    Recover bare feature name from a LIME condition string.
     e.g. 'brand_in_domain=1'  →  'brand_in_domain'
          'url_len > 45.00'    →  'url_len'
-    Uses longest-match against FEATURE_NAMES to handle underscored names correctly.
+    Uses longest-match to handle underscored names correctly.
     """
     for name in sorted(FEATURE_NAMES, key=len, reverse=True):
         if condition_str.startswith(name):
             return name
-    # Fallback: split on first operator / space
     return re.split(r"[\s<>=!]", condition_str)[0]
 
 
