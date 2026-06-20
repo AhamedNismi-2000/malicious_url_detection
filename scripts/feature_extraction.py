@@ -9,13 +9,20 @@ Split-aware pipeline:
   - StandardScaler fitted on TRAIN only, transforms val+test
   - No data leakage of any kind
 
-Feature breakdown (total: 548):
+Feature breakdown (total: 552):
   - Heuristic + Obfuscation : 45  (39 structural + 6 obfuscation)
-  - NEW rule-based features  :  3  (brand_in_domain, leet_in_domain,
+  - Rule-based features      :  3  (brand_in_domain, leet_in_domain,
                                     brand_hyphen_suspicious)
+  - NEW domain features      :  4  (domain_len, domain_digit_ratio,
+                                    max_domain_digits, path_depth)
   - Char n-gram TF-IDF      : 300
   - Word n-gram TF-IDF      : 200
-  Total                     : 548
+  Total                     : 552
+
+Changes from previous version:
+  1. SUSPICIOUS_WORDS expanded — catches security/alert/verify/login etc.
+  2. brand_mismatch logic fixed — detects brand in hostname not real domain
+  3. 4 new domain-level features added targeting FN evasion patterns
 
 Output:
   features/features_train.npz
@@ -109,12 +116,20 @@ SHORTENERS = {
     "qlnk.net", "doiop.com", "twurl.nl", "rubyurl.com", "om.ly"
 }
 
-# Reduced set — only words almost never on legitimate sites
+# FIX 1: Expanded suspicious words — catches security/alert/verify/login etc.
 SUSPICIOUS_WORDS = {
+    # Original
     "suspend", "urgent", "prize", "winner",
     "congratulations", "free-iphone", "limited-offer",
     "click-here", "verify-now", "act-now",
-    "account-suspended", "password-reset-required"
+    "account-suspended", "password-reset-required",
+    # Added — common phishing keywords
+    "security", "alert", "verify", "update",
+    "login", "signin", "confirm", "recover",
+    "unlock", "restore", "validate", "billing",
+    "suspended", "unusual", "unauthorized",
+    "immediate", "required", "expire", "expired",
+    "blocked", "limited", "access", "authenticate",
 }
 
 RISKY_TLDS = {
@@ -156,7 +171,7 @@ COMMON_PORTS = {80, 443, 8080, 8443, 3000, 5000, 8000, 9000}
 
 EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=None)
 
-# 48 feature names — must stay in sync with extract_heuristic_features()
+# 52 feature names — must stay in sync with extract_heuristic_features()
 HEURISTIC_FEATURE_NAMES = [
     # Original 39 structural features
     "url_len", "path_len", "num_dots", "path_dots", "num_hyphens",
@@ -171,13 +186,18 @@ HEURISTIC_FEATURE_NAMES = [
     # 6 obfuscation features
     "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
     "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
-    # NEW: 3 rule-based features
-    "brand_in_domain",         # brand in registered domain but not real brand
-    "leet_in_domain",          # leet speak digit in domain part only
-    "brand_hyphen_suspicious"  # brand-word or word-brand pattern
+    # 3 rule-based features
+    "brand_in_domain",
+    "leet_in_domain",
+    "brand_hyphen_suspicious",
+    # NEW: 4 domain-level features targeting FN evasion patterns
+    "domain_len",           # length of registered domain name
+    "domain_digit_ratio",   # ratio of digits in domain name only
+    "max_domain_digits",    # max consecutive digits in domain name
+    "path_depth",           # depth of URL path (/a/b/c = 3)
 ]
 
-N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 48
+N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 52
 
 
 # ================================================================
@@ -252,11 +272,6 @@ def max_repeating(s: str) -> int:
 # ================================================================
 
 def detect_leet_speak(url: str) -> float:
-    """
-    Flag leet speak only when digits appear inside alphabetic
-    word boundaries on the domain.
-    Avoids false positives on paths like /404 or mp4.
-    """
     url_lower = url.lower()
     try:
         domain_part = urlparse(url_lower).netloc
@@ -328,7 +343,6 @@ def detect_subdomain_spam(url: str) -> float:
 
 
 def calc_visual_similarity(url: str, hostname: str) -> float:
-    """Brand in path/query but NOT in hostname → suspicious."""
     url_lower  = url.lower()
     host_lower = hostname.lower()
     max_sim    = 0.0
@@ -339,43 +353,21 @@ def calc_visual_similarity(url: str, hostname: str) -> float:
 
 
 # ================================================================
-# NEW RULE-BASED FEATURES
+# RULE-BASED FEATURES
 # ================================================================
 
 def brand_in_registered_domain(registered_domain: str) -> float:
-    """
-    Brand appears in registered domain but it is NOT
-    the actual real brand domain.
-
-    paypal-security.com  → paypal in domain, not paypal.com → 1.0
-    amaz0n-prime.com     → amazon not in domain (leet) → 0.0 (leet handles)
-    paypal.com           → IS the real domain → 0.0
-    accounts.google.com  → registered = google.com → 0.0
-
-    This catches: paypal-alert.com, microsoft-update.net etc.
-    """
     rd = (registered_domain or "").lower()
     for brand in BRANDS:
         if brand in rd:
-            # Check if it is a known real brand domain
             if rd in REAL_BRAND_DOMAINS:
-                return 0.0   # legitimate brand domain
+                return 0.0
             else:
-                return 1.0   # brand in domain but not the real domain
+                return 1.0
     return 0.0
 
 
 def leet_in_domain_only(domain: str) -> float:
-    """
-    Check leet speak in the domain name only (not path or query).
-    Stronger and more targeted than the general leet_speak_score.
-
-    amaz0n  → z0n matches [a-z]0[a-z] → 1.0
-    paypa1  → a1.c matches [a-z]1[a-z] → 1.0
-    faceb00k → b0o matches → 1.0
-    mp4     → p4 no letter after → 0.0
-    404     → no letter before → 0.0
-    """
     domain_lower = (domain or "").lower()
     leet_map = {
         "4": "a", "3": "e", "1": "i",
@@ -389,14 +381,6 @@ def leet_in_domain_only(domain: str) -> float:
 
 
 def brand_hyphen_suspicious_word(url: str) -> float:
-    """
-    Brand name combined with suspicious word via hyphen in URL.
-
-    paypal-security-alert.com → paypal + security → 1.0
-    microsoft-update.com      → microsoft + update → 1.0
-    my-paypal-login.net       → paypal + login → 1.0
-    paypal.com/security       → paypal IS the domain, path is fine → 0.0
-    """
     url_lower = url.lower()
     for brand in BRANDS:
         for word in BRAND_SUSPICIOUS_WORDS:
@@ -412,7 +396,7 @@ def brand_hyphen_suspicious_word(url: str) -> float:
 # ================================================================
 
 def extract_heuristic_features(url: str) -> list:
-    """Extract all 48 heuristic + obfuscation + rule features."""
+    """Extract all 52 heuristic + obfuscation + rule + new domain features."""
     try:
         if not isinstance(url, str) or len(url) < 5:
             return [0.0] * N_HEURISTIC
@@ -464,10 +448,14 @@ def extract_heuristic_features(url: str) -> list:
         shortened  = 1.0 if is_shortened(hostname, domain) else 0.0
         sus_words  = float(count_suspicious_words(url))
 
-        # FIX: check hostname not just registered domain
+        # FIX 2: brand_mismatch — brand in hostname but NOT real brand domain
         brand_mismatch = 0.0
         for brand in BRANDS:
-            if brand in url_lower and brand not in hostname.lower():
+            if brand in hostname.lower():
+                if domain not in REAL_BRAND_DOMAINS:
+                    brand_mismatch = 1.0
+                    break
+            elif brand in url_lower:
                 brand_mismatch = 1.0
                 break
 
@@ -502,10 +490,20 @@ def extract_heuristic_features(url: str) -> list:
         sub_spam   = detect_subdomain_spam(url)
         visual_sim = calc_visual_similarity(url, hostname)
 
-        # NEW: Rule-based features (3)
-        brand_in_dom    = brand_in_registered_domain(domain)
-        leet_dom        = leet_in_domain_only(ext.domain or "")
-        brand_hyp_susp  = brand_hyphen_suspicious_word(url)
+        # Rule-based features (3)
+        brand_in_dom   = brand_in_registered_domain(domain)
+        leet_dom       = leet_in_domain_only(ext.domain or "")
+        brand_hyp_susp = brand_hyphen_suspicious_word(url)
+
+        # NEW: 4 domain-level features targeting FN evasion patterns
+        domain_str        = ext.domain or ""
+        domain_len        = float(len(domain_str))
+        domain_digit_ratio = (
+            sum(c.isdigit() for c in domain_str) / len(domain_str)
+            if domain_str else 0.0
+        )
+        max_domain_digits = float(max_consecutive(domain_str, "digit"))
+        path_depth        = float(len([p for p in path.split("/") if p]))
 
         return [
             # 39 structural features
@@ -523,8 +521,10 @@ def extract_heuristic_features(url: str) -> list:
             suspicious_port, max_cons, max_vows, max_digs,
             # 6 obfuscation features
             leet, homoglyph, enc_ratio, punycode, sub_spam, visual_sim,
-            # 3 new rule-based features
-            brand_in_dom, leet_dom, brand_hyp_susp
+            # 3 rule-based features
+            brand_in_dom, leet_dom, brand_hyp_susp,
+            # 4 new domain-level features
+            domain_len, domain_digit_ratio, max_domain_digits, path_depth,
         ]
 
     except Exception:
@@ -594,7 +594,7 @@ def fit_vectorizers(train_urls: list):
         max_features=MAX_FEAT_WORD,
         min_df=MIN_DF,
         lowercase=False,
-        token_pattern=r"[a-zA-Z0-9@]+",  # FIX: splits on - and . for brand+word patterns
+        token_pattern=r"[a-zA-Z0-9@]+",
         dtype=np.float32
     )
     word_vec.fit(processed)
@@ -670,7 +670,7 @@ def process_split(name: str, path: str,
     logger.info(f"   Labels — Benign: {label_counts[0]:,} | "
                 f"Malicious: {label_counts[1]:,}")
 
-    # 1. Heuristic features (48)
+    # 1. Heuristic features (52)
     logger.info("   Extracting heuristic features...")
     heuristic_arr = extract_heuristic_batch(urls)
     logger.info(f"   Heuristic shape: {heuristic_arr.shape}")
@@ -711,7 +711,10 @@ def process_split(name: str, path: str,
 def main():
     logger.info("FEATURE EXTRACTION PIPELINE")
     logger.info("=" * 60)
-    logger.info("Total features: 548 (45 heuristic + 3 new + 500 NLP)")
+    logger.info("Total features: 552 (52 heuristic + 500 NLP)")
+    logger.info("Changes: expanded SUSPICIOUS_WORDS, fixed brand_mismatch,")
+    logger.info("         added domain_len, domain_digit_ratio,")
+    logger.info("         max_domain_digits, path_depth")
     logger.info("Split-aware: vectorizer and scaler fitted on TRAIN only")
     logger.info("=" * 60)
 
