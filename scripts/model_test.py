@@ -8,9 +8,8 @@ Two-layer prediction:
   Layer 1: Whitelist  — known trusted domains bypass ML model
   Layer 2: ML model   — unknown domains run through full pipeline
 
-Feature count: 548
-  45 heuristic + obfuscation
-   3 new rule-based (brand_in_domain, leet_in_domain, brand_hyphen)
+Feature count: 552
+  52 heuristic + obfuscation + rule-based + new domain features
  300 char n-gram TF-IDF
  200 word n-gram TF-IDF
 
@@ -126,11 +125,20 @@ SHORTENERS = {
     "qlnk.net", "doiop.com", "twurl.nl", "rubyurl.com", "om.ly"
 }
 
+# Updated — matches feature_extraction.py
 SUSPICIOUS_WORDS = {
+    # Original
     "suspend", "urgent", "prize", "winner",
     "congratulations", "free-iphone", "limited-offer",
     "click-here", "verify-now", "act-now",
-    "account-suspended", "password-reset-required"
+    "account-suspended", "password-reset-required",
+    # Added
+    "security", "alert", "verify", "update",
+    "login", "signin", "confirm", "recover",
+    "unlock", "restore", "validate", "billing",
+    "suspended", "unusual", "unauthorized",
+    "immediate", "required", "expire", "expired",
+    "blocked", "limited", "access", "authenticate",
 }
 
 RISKY_TLDS = {
@@ -168,7 +176,7 @@ BRAND_SUSPICIOUS_WORDS = {
 
 COMMON_PORTS = {80, 443, 8080, 8443, 3000, 5000, 8000, 9000}
 EXTRACTOR    = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=None)
-N_HEURISTIC  = 48   # updated from 45 to 48
+N_HEURISTIC  = 52   # updated: 48 + 4 new domain features
 
 
 # ---------------- FEATURE FUNCTIONS ----------------
@@ -286,7 +294,6 @@ def calc_visual_similarity(url, hostname):
             max_sim = max(max_sim, 0.9)
     return max_sim
 
-# NEW rule-based features
 def brand_in_registered_domain(registered_domain):
     rd = (registered_domain or "").lower()
     for brand in BRANDS:
@@ -317,7 +324,7 @@ def brand_hyphen_suspicious_word(url):
 
 
 def extract_features(url: str) -> list:
-    """Extract all 48 features — identical to feature_extraction.py."""
+    """Extract all 52 features — identical to feature_extraction.py."""
     try:
         if not isinstance(url, str) or len(url) < 5:
             return [0.0] * N_HEURISTIC
@@ -368,9 +375,14 @@ def extract_features(url: str) -> list:
         shortened  = 1.0 if is_shortened(hostname, domain) else 0.0
         sus_words  = float(count_suspicious_words(url))
 
+        # FIX: brand_mismatch — brand in hostname but NOT real brand domain
         brand_mismatch = 0.0
         for brand in BRANDS:
-            if brand in url_lower and brand not in hostname.lower():
+            if brand in hostname.lower():
+                if domain not in REAL_BRAND_DOMAINS:
+                    brand_mismatch = 1.0
+                    break
+            elif brand in url_lower:
                 brand_mismatch = 1.0
                 break
 
@@ -403,10 +415,20 @@ def extract_features(url: str) -> list:
         sub_spam   = detect_subdomain_spam(url)
         visual_sim = calc_visual_similarity(url, hostname)
 
-        # NEW 3 rule-based features
+        # Rule-based features (3)
         brand_in_dom   = brand_in_registered_domain(domain)
         leet_dom       = leet_in_domain_only(ext.domain or "")
         brand_hyp_susp = brand_hyphen_suspicious_word(url)
+
+        # NEW: 4 domain-level features
+        domain_str         = ext.domain or ""
+        domain_len         = float(len(domain_str))
+        domain_digit_ratio = (
+            sum(c.isdigit() for c in domain_str) / len(domain_str)
+            if domain_str else 0.0
+        )
+        max_domain_digits  = float(max_consecutive(domain_str, "digit"))
+        path_depth         = float(len([p for p in path.split("/") if p]))
 
         return [
             float(url_len), float(path_length), float(num_dots),
@@ -422,7 +444,9 @@ def extract_features(url: str) -> list:
             shortened, sus_words, brand_mismatch, puny, susp_ext,
             suspicious_port, max_cons, max_vows, max_digs,
             leet, homoglyph, enc_ratio, punycode, sub_spam, visual_sim,
-            brand_in_dom, leet_dom, brand_hyp_susp
+            brand_in_dom, leet_dom, brand_hyp_susp,
+            # 4 new domain features
+            domain_len, domain_digit_ratio, max_domain_digits, path_depth,
         ]
 
     except Exception:
@@ -502,7 +526,7 @@ def main():
     print("=" * 70)
     print("MODEL SANITY CHECK — 25 URL TEST")
     print("=" * 70)
-    print("Two-layer: Whitelist + ML Model (548 features)")
+    print("Two-layer: Whitelist + ML Model (552 features)")
     print("=" * 70)
 
     required = {
@@ -538,7 +562,7 @@ def main():
     print(f"  Whitelist : {len(TRUSTED_DOMAINS)} trusted domains")
 
     # Verify feature count matches
-    expected_features = 548
+    expected_features = 552
     if model.n_features_in_ != expected_features:
         print(f"\n  WARNING: Model has {model.n_features_in_} features "
               f"but extraction produces {expected_features}.")
