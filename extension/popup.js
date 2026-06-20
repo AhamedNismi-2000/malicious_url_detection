@@ -1,68 +1,11 @@
 /**
- * popup.js — Fetches URL, prediction and LIME explanation from the Flask API
- * and renders everything in popup.html.
+ * popup.js — Fetches prediction and LIME explanation, renders user-friendly
+ * natural language reasons instead of technical feature names.
  */
 
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
-
-// ── Human-readable labels for heuristic feature names ────────────────────────
-const FEATURE_LABELS = {
-  // Brand / impersonation
-  brand_in_domain         : "Brand impersonation detected",
-  brand_hyphen_suspicious : "Fake brand domain pattern",
-  brand_mismatch          : "Brand used outside real domain",
-  leet_in_domain          : "Disguised brand name (e.g. amaz0n)",
-  visual_brand_similarity : "Visually similar to known brand",
-  homoglyph_suspicious    : "Look-alike characters detected",
-  punycode_suspicious     : "Internationalized domain trick",
-  puny                    : "Punycode domain detected",
-
-  // Domain / TLD
-  risky_tld               : "Suspicious domain ending (.tk .xyz)",
-  ip_flag                 : "IP address used as domain",
-  shortened               : "URL shortener detected",
-  suspicious_port         : "Unusual port number",
-  has_multi_subdomain     : "Excessive subdomains",
-  subdomain_spam_score    : "Subdomain spam pattern",
-  tld_len                 : "Unusually long domain suffix",
-
-  // URL structure
-  url_len                 : "Unusually long URL",
-  num_hyphens             : "Excessive hyphens in URL",
-  num_at                  : "@ symbol in URL",
-  num_percent             : "Percent-encoding in URL",
-  num_non_ascii           : "Non-standard characters in URL",
-  num_special             : "Excessive special characters",
-  url_entropy             : "Randomly generated domain",
-  ratio_digits            : "High proportion of digits",
-  encoding_ratio          : "Heavy URL encoding",
-  susp_ext                : "Suspicious file extension",
-
-  // Content signals
-  sus_words               : "Phishing keywords found",
-  leet_speak_score        : "Leet-speak obfuscation",
-
-  // HTTPS — direction depends on weight sign, handled in render
-  https_flag              : "Missing HTTPS security",
-};
-
-// Features to always hide from the popup (n-gram TF-IDF — not user-readable)
-function isInterpretable(featureName) {
-  return (
-    !featureName.startsWith("char_") &&
-    !featureName.startsWith("word_")
-  );
-}
-
-function friendlyLabel(feature, weight) {
-  // Special case: https_flag with positive weight means HTTP (no HTTPS) is suspicious
-  if (feature === "https_flag") {
-    return weight > 0 ? "Missing HTTPS security" : "HTTPS present (safe signal)";
-  }
-  return FEATURE_LABELS[feature] || feature.replace(/_/g, " ");
-}
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -115,19 +58,19 @@ function renderCard(result) {
     ? result.url.slice(0, 77) + "…"
     : result.url || "—";
 
+  // Source subtitle
+  let subtitle = "ML model classification";
+  if (result.source === "whitelist")    subtitle = "Trusted domain — whitelist";
+  else if (result.source === "error")   subtitle = "API unreachable";
+  else if (result.brand_detected)       subtitle = `Impersonating ${result.brand_detected}`;
+
   document.getElementById("main-content").innerHTML = `
     <div class="card ${vc}">
       <div class="verdict ${vc}">
         <div class="verdict-icon">${verdictEmoji(result.prediction)}</div>
         <div>
           <div class="verdict-label">${result.prediction || "UNKNOWN"}</div>
-          <div class="verdict-sub">${
-            result.source === "whitelist"
-              ? "Trusted domain — whitelist"
-              : result.source === "error"
-              ? "API unreachable"
-              : "ML model classification"
-          }</div>
+          <div class="verdict-sub">${escapeHtml(subtitle)}</div>
         </div>
       </div>
 
@@ -142,10 +85,22 @@ function renderCard(result) {
         </div>
       </div>` : ""}
 
+      ${result.brand_detected ? `
+      <div class="brand-row">
+        <span class="brand-icon">⚠</span>
+        <span>Real website: <strong>${escapeHtml(result.real_domain || "")}</strong></span>
+      </div>` : ""}
+
       <div class="url-row">
         <div class="url-label">URL</div>
         <div class="url-text">${escapeHtml(truncUrl)}</div>
       </div>
+
+      ${result.unshortened ? `
+      <div class="url-row" style="border-top:1px solid var(--c-border);">
+        <div class="url-label">Resolved to</div>
+        <div class="url-text">${escapeHtml(result.unshortened.slice(0, 80))}</div>
+      </div>` : ""}
     </div>
   `;
 
@@ -159,50 +114,28 @@ function renderCard(result) {
   }
 }
 
-function renderExplanation(explanation, prediction) {
+function renderReasons(reasons, prediction) {
   const ec = document.getElementById("explain-content");
-  if (!explanation || explanation.length === 0) {
+
+  if (!reasons || reasons.length === 0) {
     ec.innerHTML = "";
     return;
   }
 
-  // Filter out n-gram features (char_*, word_*) — not user-readable
-  // Then take top 3 by absolute weight
-  const top3 = explanation
-    .filter(f => isInterpretable(f.feature))
-    .slice(0, 3);
+  const isMal  = prediction === "MALICIOUS";
+  const title  = isMal ? "Why is this dangerous?" : "Why is this safe?";
+  const dotCls = isMal ? "mal" : "ben";
 
-  if (top3.length === 0) {
-    ec.innerHTML = "";
-    return;
-  }
-
-  const isMal = prediction === "MALICIOUS";
-
-  const items = top3.map(({ feature, weight, value }) => {
-    const positive    = weight > 0;
-    const dotClass    = positive ? "mal" : "ben";
-    const labelText   = friendlyLabel(feature, weight);
-
-    // Value display — show meaningful context instead of raw numbers
-    let valText;
-    if (value === 1 || value > 0.9)      valText = "detected";
-    else if (value === 0 || value < 0.1) valText = "not present";
-    else                                  valText = `score ${value.toFixed(2)}`;
-
-    return `
-      <div class="reason-pill">
-        <div class="reason-dot ${dotClass}"></div>
-        <div class="reason-name">${escapeHtml(labelText)}</div>
-        <div class="reason-meta">${escapeHtml(valText)}</div>
-      </div>`;
-  }).join("");
+  const items = reasons.map((reason, i) => `
+    <div class="reason-pill">
+      <div class="reason-dot ${dotCls}">${i + 1}</div>
+      <div class="reason-text">${escapeHtml(reason)}</div>
+    </div>
+  `).join("");
 
   ec.innerHTML = `
     <div class="explain-section">
-      <div class="explain-title">
-        ${isMal ? "Why malicious?" : "Why benign?"}
-      </div>
+      <div class="explain-title">${title}</div>
       <div class="explain-list">${items}</div>
     </div>
   `;
@@ -210,9 +143,7 @@ function renderExplanation(explanation, prediction) {
 
 function renderError(msg) {
   document.getElementById("main-content").innerHTML = `
-    <div class="state-msg">
-      ⚠ ${escapeHtml(msg)}
-    </div>`;
+    <div class="state-msg">⚠ ${escapeHtml(msg)}</div>`;
   document.getElementById("explain-content").innerHTML = "";
 }
 
@@ -237,20 +168,18 @@ async function run() {
 
   const apiBase = await getApiBase();
 
-  // Check session cache first
+  // Check session cache
   let prediction;
   try {
-    const store = await chrome.storage.session.get(`tab_${tab.id}`);
+    const store  = await chrome.storage.session.get(`tab_${tab.id}`);
     const cached = store[`tab_${tab.id}`];
-    if (cached && cached.url === url) {
-      prediction = cached;
-    }
+    if (cached && cached.url === url) prediction = cached;
   } catch (_) {}
 
   if (!prediction) {
     try {
-      prediction      = await callPredict(url, apiBase);
-      prediction.url  = url;
+      prediction     = await callPredict(url, apiBase);
+      prediction.url = url;
     } catch (err) {
       renderError(`Could not reach API at ${apiBase}.\nMake sure Flask is running.`);
       return;
@@ -259,18 +188,29 @@ async function run() {
 
   renderCard(prediction);
 
-  // Fetch LIME explanation for model-classified URLs only
+  // Fetch LIME explanation for model-classified URLs
   if (prediction.source === "model") {
     try {
       const explained = await callExplain(url, apiBase);
-      renderExplanation(explained.explanation, prediction.prediction);
+
+      // Use natural language reasons from backend
+      const reasons = explained.reasons || [];
+
+      // Update brand info if explanation has it
+      if (explained.brand_detected && !prediction.brand_detected) {
+        prediction.brand_detected = explained.brand_detected;
+        prediction.real_domain    = explained.real_domain;
+        renderCard(prediction);   // re-render with brand info
+      }
+
+      renderReasons(reasons, prediction.prediction);
     } catch (_) {
-      // Explanation is best-effort — silently ignore
+      // Best-effort — silently ignore
     }
   }
 }
 
-// ── Settings panel ─────────────────────────────────────────────────────────────
+// ── Settings panel ────────────────────────────────────────────────────────────
 
 document.getElementById("settings-toggle").addEventListener("click", () => {
   const panel   = document.getElementById("settings-panel");
@@ -295,5 +235,5 @@ document.getElementById("save-settings").addEventListener("click", () => {
   });
 });
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
 run();

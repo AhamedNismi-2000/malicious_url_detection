@@ -8,19 +8,18 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --c-bg        : #0f1117;
-      --c-surface   : #1a1d27;
-      --c-border    : #2a2d3a;
-      --c-text      : #e2e4ec;
-      --c-muted     : #6b7280;
-      --c-mal       : #ef4444;
-      --c-mal-dim   : #7f1d1d;
-      --c-ben       : #22c55e;
-      --c-ben-dim   : #14532d;
-      --c-warn      : #f59e0b;
-      --c-accent    : #818cf8;
-      --radius      : 8px;
-      --font        : "Segoe UI", system-ui, sans-serif;
+      --c-bg      : #0f1117;
+      --c-surface : #1a1d27;
+      --c-border  : #2a2d3a;
+      --c-text    : #e2e4ec;
+      --c-muted   : #6b7280;
+      --c-mal     : #ef4444;
+      --c-mal-dim : #7f1d1d;
+      --c-ben     : #22c55e;
+      --c-ben-dim : #14532d;
+      --c-accent  : #818cf8;
+      --radius    : 8px;
+      --font      : "Segoe UI", system-ui, sans-serif;
     }
 
     body {
@@ -32,7 +31,7 @@
       font-size: 13px;
     }
 
-    /* ── Header ── */
+    /* Header */
     .header {
       display: flex;
       align-items: center;
@@ -40,7 +39,6 @@
       padding: 12px 14px 10px;
       border-bottom: 1px solid var(--c-border);
     }
-    .header svg { flex-shrink: 0; }
     .header-title { font-weight: 600; font-size: 14px; letter-spacing: .3px; }
     .header-sub   { font-size: 10px; color: var(--c-muted); margin-top: 1px; }
     .settings-btn {
@@ -52,7 +50,7 @@
     }
     .settings-btn:hover { color: var(--c-text); }
 
-    /* ── Main card ── */
+    /* Card */
     .card {
       margin: 12px;
       border-radius: var(--radius);
@@ -61,7 +59,7 @@
       overflow: hidden;
     }
 
-    /* verdict strip */
+    /* Verdict strip */
     .verdict {
       display: flex;
       align-items: center;
@@ -76,8 +74,7 @@
       width: 36px; height: 36px;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      font-size: 18px;
+      flex-shrink: 0; font-size: 18px;
     }
     .malicious .verdict-icon { background: var(--c-mal-dim); }
     .benign    .verdict-icon { background: var(--c-ben-dim); }
@@ -89,10 +86,9 @@
     .malicious .verdict-label { color: var(--c-mal); }
     .benign    .verdict-label { color: var(--c-ben); }
     .unknown   .verdict-label { color: var(--c-muted); }
-
     .verdict-sub { font-size: 11px; color: var(--c-muted); margin-top: 2px; }
 
-    /* confidence bar */
+    /* Confidence bar */
     .conf-row {
       padding: 8px 14px 10px;
       border-top: 1px solid var(--c-border);
@@ -106,15 +102,22 @@
       height: 5px; background: var(--c-border);
       border-radius: 3px; overflow: hidden;
     }
-    .bar-fill {
-      height: 100%; border-radius: 3px;
-      transition: width .4s ease;
-    }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
     .malicious .bar-fill { background: var(--c-mal); }
     .benign    .bar-fill { background: var(--c-ben); }
     .unknown   .bar-fill { background: var(--c-muted); }
 
-    /* URL display */
+    /* Brand row */
+    .brand-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      border-top: 1px solid var(--c-border);
+      background: rgba(239,68,68,.07);
+      font-size: 11px; color: var(--c-text);
+    }
+    .brand-icon { font-size: 13px; }
+
+    /* URL row */
     .url-row {
       padding: 8px 14px 10px;
       border-top: 1px solid var(--c-border);
@@ -125,10 +128,8 @@
       word-break: break-all; max-height: 44px; overflow: hidden;
     }
 
-    /* ── Explanation ── */
-    .explain-section {
-      margin: 0 12px 12px;
-    }
+    /* Explanation */
+    .explain-section { margin: 0 12px 12px; }
     .explain-title {
       font-size: 11px; font-weight: 600; color: var(--c-muted);
       text-transform: uppercase; letter-spacing: .6px;
@@ -137,21 +138,24 @@
     .explain-list { display: flex; flex-direction: column; gap: 5px; }
 
     .reason-pill {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: flex-start; gap: 8px;
       background: var(--c-surface);
       border: 1px solid var(--c-border);
       border-radius: 6px;
-      padding: 7px 10px;
+      padding: 8px 10px;
     }
     .reason-dot {
-      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
+      flex-shrink: 0; margin-top: 1px;
     }
-    .reason-dot.mal { background: var(--c-mal); }
-    .reason-dot.ben { background: var(--c-ben); }
-    .reason-name { font-weight: 600; font-size: 12px; flex: 1; }
-    .reason-meta { font-size: 10px; color: var(--c-muted); white-space: nowrap; }
+    .reason-dot.mal { background: var(--c-mal-dim); color: var(--c-mal); }
+    .reason-dot.ben { background: var(--c-ben-dim); color: var(--c-ben); }
+    .reason-text { font-size: 12px; line-height: 1.5; color: var(--c-text); }
 
-    /* loading + error states */
+    /* Loading + error */
     .state-msg {
       padding: 32px 16px;
       text-align: center;
@@ -168,7 +172,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Settings panel ── */
+    /* Settings */
     #settings-panel {
       display: none;
       margin: 0 12px 12px;
@@ -200,7 +204,7 @@
     }
     .save-btn:hover { filter: brightness(1.15); }
 
-    /* ── Footer ── */
+    /* Footer */
     .footer {
       padding: 6px 14px 8px;
       border-top: 1px solid var(--c-border);
@@ -238,7 +242,7 @@
   </button>
 </div>
 
-<!-- Main result card (populated by popup.js) -->
+<!-- Main result card -->
 <div id="main-content">
   <div class="state-msg">
     <div class="spinner"></div>
@@ -246,10 +250,10 @@
   </div>
 </div>
 
-<!-- Explanation section (populated by popup.js) -->
+<!-- Explanation -->
 <div id="explain-content"></div>
 
-<!-- Settings panel -->
+<!-- Settings -->
 <div id="settings-panel">
   <label for="api-url">API Base URL</label>
   <input type="text" id="api-url" placeholder="http://localhost:5000" />
