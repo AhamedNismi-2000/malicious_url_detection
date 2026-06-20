@@ -7,6 +7,10 @@ Loads model artefacts and exposes three public methods:
   predict_batch(urls)                -> list[dict]
   explain_url(url, num_features=10)  -> dict   (prediction + LIME explanation)
 
+Extra capabilities:
+  - Reverse DNS  : IP-based URLs resolved to domain name before classification
+  - Unshortening : Short URLs (bit.ly etc.) followed to real destination first
+
 The URLClassifier is a singleton; import `classifier` directly:
 
   from model_loader import classifier
@@ -16,12 +20,14 @@ import json
 import os
 import re
 import sys
+import socket
 import threading
 import warnings
 from typing import Optional
 
 import joblib
 import numpy as np
+import requests
 
 # ── Locate project root and add scripts/ to path ─────────────────────────────
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +37,11 @@ _SCRIPTS = os.path.join(_ROOT, "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-from feature_extraction import extract_heuristic_features, preprocess_url_for_nlp
+from feature_extraction import (
+    extract_heuristic_features,
+    preprocess_url_for_nlp,
+    SHORTENERS,
+)
 
 # ── Path constants ────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(_ROOT, "models")
@@ -67,7 +77,11 @@ _CATEGORICAL_FEATURE_NAMES: list[str] = [
     "brand_hyphen_suspicious",
 ]
 
-# 54 trusted domains — instant BENIGN without hitting the model
+# Private IP ranges — never resolve, always classify directly
+_PRIVATE_IP_RE = re.compile(
+    r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1)"
+)
+
 WHITELIST: frozenset[str] = frozenset({
     "163.com",
     "1rx.io",
@@ -1083,6 +1097,83 @@ WHITELIST: frozenset[str] = frozenset({
 })
 
 
+# ── Reverse DNS ───────────────────────────────────────────────────────────────
+
+def reverse_dns(ip: str, timeout: int = 3) -> Optional[str]:
+    """
+    Resolve an IP address to its hostname via reverse DNS.
+    Returns None if no PTR record exists or on any error.
+    Skips private/loopback IPs immediately.
+    """
+    if _PRIVATE_IP_RE.match(ip):
+        return None   # private IPs never resolve to public domains
+    try:
+        socket.setdefaulttimeout(timeout)
+        hostname = socket.gethostbyaddr(ip)[0]
+        return hostname.lower().rstrip(".")
+    except (socket.herror, socket.gaierror, OSError):
+        return None
+
+
+# ── URL Unshortening ──────────────────────────────────────────────────────────
+
+def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
+    """
+    Follow redirect chain and return the final destination URL.
+
+    Returns:
+        (final_url, was_redirected)
+        was_redirected = True if the URL actually redirected somewhere else
+    """
+    try:
+        resp = requests.head(
+            url,
+            allow_redirects=True,
+            timeout=timeout,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+                )
+            },
+        )
+        final = resp.url
+        was_redirected = final.rstrip("/") != url.rstrip("/")
+        return final, was_redirected
+    except Exception:
+        return url, False   # fall back to original URL on any error
+
+
+def _is_shortener(url: str) -> bool:
+    """Check if URL's registered domain is a known shortener."""
+    try:
+        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
+        host    = cleaned.split("/")[0].split(":")[0].lower()
+        parts   = host.split(".")
+        rd      = ".".join(parts[-2:]) if len(parts) >= 2 else host
+        return rd in SHORTENERS or host in SHORTENERS
+    except Exception:
+        return False
+
+
+def _extract_ip(url: str) -> Optional[str]:
+    """Extract IP address from URL host if present, else None."""
+    try:
+        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
+        host    = cleaned.split("/")[0].split(":")[0].strip("[]")
+        # Basic IPv4 check
+        parts = host.split(".")
+        if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255
+                                    for p in parts):
+            return host
+        # IPv6 (bracketed)
+        if ":" in host:
+            return host
+        return None
+    except Exception:
+        return None
+
+
 # ── URLClassifier (singleton) ─────────────────────────────────────────────────
 
 class URLClassifier:
@@ -1131,7 +1222,7 @@ class URLClassifier:
         # 48 heuristic features — scaler was fitted on these only
         heuristic = np.array(
             extract_heuristic_features(url), dtype=np.float32
-        ).reshape(1, -1)                                            # (1, 48)
+        ).reshape(1, -1)                                                # (1, 48)
         heuristic_scaled = self.scaler.transform(heuristic).flatten()  # (48,)
 
         # 300 + 200 NLP features — unscaled, exactly as during training
@@ -1139,12 +1230,46 @@ class URLClassifier:
         char_dense = self.vec_char.transform([processed]).toarray().flatten()  # (300,)
         word_dense = self.vec_word.transform([processed]).toarray().flatten()  # (200,)
 
-        # Concatenate in training order: heuristic_scaled + char + word
         return np.concatenate([heuristic_scaled, char_dense, word_dense])  # (548,)
+
+    def _classify(self, url: str) -> dict:
+        """
+        Core ML classification — no preprocessing.
+        Assumes url has already been resolved/unshortened.
+        """
+        try:
+            fv    = self._feature_vector(url)
+            proba = float(self.model.predict_proba(fv.reshape(1, -1))[0][1])
+            label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+            return {
+                "prediction": label,
+                "confidence": round(proba * 100, 2),
+                "threshold" : round(self.threshold * 100, 2),
+                "source"    : "model",
+            }
+        except Exception as exc:
+            return {
+                "prediction": "BENIGN",
+                "confidence": 0.0,
+                "threshold" : round(self.threshold * 100, 2),
+                "source"    : "invalid",
+                "error"     : str(exc),
+            }
 
     # ── Public: prediction ────────────────────────────────────────────────────
 
     def predict_url(self, url: str) -> dict:
+        """
+        Classify a single URL.
+
+        Pipeline:
+          1. Validate
+          2. Whitelist check
+          3. Reverse DNS  (if IP-based URL)
+          4. Unshorten    (if known shortener)
+          5. Whitelist check again (on resolved URL)
+          6. ML classification
+        """
         if not url or not isinstance(url, str):
             return {
                 "url": url, "prediction": "BENIGN",
@@ -1153,31 +1278,67 @@ class URLClassifier:
                 "source": "invalid",
             }
 
+        original_url  = url
+        resolved_url  = None   # set if IP was resolved
+        unshortened   = None   # set if URL was unshortened
+
+        # ── Step 1: Whitelist check on original URL ───────────────────────────
         if self._registered_domain(url) in WHITELIST:
             return {
-                "url": url, "prediction": "BENIGN",
+                "url": original_url, "prediction": "BENIGN",
                 "confidence": 100.0,
                 "threshold": round(self.threshold * 100, 2),
                 "source": "whitelist",
             }
 
-        try:
-            fv    = self._feature_vector(url)
-            proba = float(self.model.predict_proba(fv.reshape(1, -1))[0][1])
-            label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-            return {
-                "url": url, "prediction": label,
-                "confidence": round(proba * 100, 2),
-                "threshold" : round(self.threshold * 100, 2),
-                "source"    : "model",
-            }
-        except Exception as exc:
-            return {
-                "url": url, "prediction": "BENIGN",
-                "confidence": 0.0,
-                "threshold": round(self.threshold * 100, 2),
-                "source": "invalid", "error": str(exc),
-            }
+        # ── Step 2: Reverse DNS (IP-based URLs) ───────────────────────────────
+        ip = _extract_ip(url)
+        if ip:
+            hostname = reverse_dns(ip)
+            if hostname:
+                resolved_url = url.replace(ip, hostname)
+                reg = self._registered_domain(resolved_url)
+                if reg in WHITELIST:
+                    return {
+                        "url"         : original_url,
+                        "prediction"  : "BENIGN",
+                        "confidence"  : 100.0,
+                        "threshold"   : round(self.threshold * 100, 2),
+                        "source"      : "whitelist",
+                        "resolved_ip" : hostname,
+                    }
+                # Classify using resolved hostname URL
+                url = resolved_url
+
+        # ── Step 3: Unshorten (known shortener domains) ───────────────────────
+        elif _is_shortener(url):
+            final_url, was_redirected = unshorten_url(url)
+            if was_redirected:
+                unshortened = final_url
+                # Whitelist check on real destination
+                if self._registered_domain(final_url) in WHITELIST:
+                    return {
+                        "url"        : original_url,
+                        "prediction" : "BENIGN",
+                        "confidence" : 100.0,
+                        "threshold"  : round(self.threshold * 100, 2),
+                        "source"     : "whitelist",
+                        "unshortened": final_url,
+                    }
+                # Classify real destination URL
+                url = final_url
+
+        # ── Step 4: ML classification ─────────────────────────────────────────
+        result = self._classify(url)
+        result["url"] = original_url
+
+        # Add resolution metadata if applicable
+        if resolved_url:
+            result["resolved_ip"] = hostname
+        if unshortened:
+            result["unshortened"] = unshortened
+
+        return result
 
     def predict_batch(self, urls: list[str]) -> list[dict]:
         return [self.predict_url(u) for u in urls]
@@ -1194,9 +1355,12 @@ class URLClassifier:
         if base["source"] in ("whitelist", "invalid"):
             return {**base, "explanation": []}
 
+        # Use the resolved/unshortened URL for LIME if available
+        classify_url = base.get("unshortened") or base.get("resolved_ip") or url
+
         try:
             explainer = self._get_explainer()
-            fv        = self._feature_vector(url)
+            fv        = self._feature_vector(classify_url)
 
             exp = explainer.explain_instance(
                 data_row     = fv,
@@ -1233,7 +1397,7 @@ class URLClassifier:
             return self._explainer
 
         with self._explainer_lock:
-            if self._explainer is not None:  # double-checked
+            if self._explainer is not None:
                 return self._explainer
 
             try:
@@ -1262,15 +1426,14 @@ class URLClassifier:
             )
             return self._explainer
 
-    def _load_background(self, n_samples: int = 5000) -> np.ndarray:
+    def _load_background(self, n_samples: int = 500) -> np.ndarray:
         """Load lime_background.npz; fall back to building from train_urls.csv."""
         bg_path = os.path.join(MODELS_DIR, "lime_background.npz")
         if os.path.exists(bg_path):
             return np.load(bg_path)["X"]
 
         warnings.warn(
-            f"{bg_path} not found — building LIME background from train_urls.csv. "
-            "This runs once then saves the result.",
+            f"{bg_path} not found — building LIME background from train_urls.csv.",
             RuntimeWarning, stacklevel=3,
         )
 
@@ -1278,9 +1441,7 @@ class URLClassifier:
         csv_path = os.path.join(_ROOT, "data", "splits", "train_urls.csv")
         if not os.path.exists(csv_path):
             raise FileNotFoundError(
-                f"Cannot find {bg_path} or {csv_path}.\n"
-                "Run: python -c \"from model_loader import classifier; "
-                "classifier._load_background()\""
+                f"Cannot find {bg_path} or {csv_path}."
             )
 
         with open(csv_path, newline="", encoding="utf-8") as fh:
@@ -1311,7 +1472,6 @@ def _parse_lime_feature(condition_str: str) -> str:
     Recover bare feature name from a LIME condition string.
     e.g. 'brand_in_domain=1'  →  'brand_in_domain'
          'url_len > 45.00'    →  'url_len'
-    Uses longest-match to handle underscored names correctly.
     """
     for name in sorted(FEATURE_NAMES, key=len, reverse=True):
         if condition_str.startswith(name):
