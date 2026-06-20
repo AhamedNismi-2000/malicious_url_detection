@@ -25,3 +25,4 @@ features/
 Thumbs.db
 
 models/
+metrics/
