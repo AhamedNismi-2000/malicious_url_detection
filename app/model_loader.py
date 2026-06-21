@@ -63,6 +63,7 @@ HEURISTIC_FEATURES: list[str] = [
     "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
     "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
     "brand_in_domain", "leet_in_domain", "brand_hyphen_suspicious",
+    "domain_len", "domain_digit_ratio", "max_domain_digits", "path_depth",
 ]
 
 FEATURE_NAMES: list[str] = (
