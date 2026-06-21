@@ -1,13 +1,12 @@
 /**
- * popup.js — Fetches prediction and LIME explanation, renders user-friendly
- * natural language reasons instead of technical feature names.
+ * popup.js — Renders prediction + cached natural language reasons.
+ * Reasons are fetched by background.js and cached in session storage,
+ * so they appear instantly when popup opens — no waiting for LIME.
  */
 
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
-
-// ── API helpers ───────────────────────────────────────────────────────────────
 
 async function getApiBase() {
   return new Promise((resolve) =>
@@ -37,7 +36,7 @@ async function callExplain(url, apiBase) {
   return res.json();
 }
 
-// ── Render helpers ─────────────────────────────────────────────────────────────
+// ── Render helpers ────────────────────────────────────────────────────────────
 
 function verdictClass(prediction) {
   if (prediction === "MALICIOUS") return "malicious";
@@ -58,11 +57,10 @@ function renderCard(result) {
     ? result.url.slice(0, 77) + "…"
     : result.url || "—";
 
-  // Source subtitle
   let subtitle = "ML model classification";
-  if (result.source === "whitelist")    subtitle = "Trusted domain — whitelist";
-  else if (result.source === "error")   subtitle = "API unreachable";
-  else if (result.brand_detected)       subtitle = `Impersonating ${result.brand_detected}`;
+  if (result.source === "whitelist")  subtitle = "Trusted domain — whitelist";
+  else if (result.source === "error") subtitle = "API unreachable";
+  else if (result.brand_detected)     subtitle = `Impersonating ${result.brand_detected}`;
 
   document.getElementById("main-content").innerHTML = `
     <div class="card ${vc}">
@@ -104,7 +102,6 @@ function renderCard(result) {
     </div>
   `;
 
-  // Footer
   const footer = document.getElementById("footer-row");
   footer.style.display = "flex";
   document.getElementById("src-badge").textContent = result.source || "—";
@@ -122,8 +119,8 @@ function renderReasons(reasons, prediction) {
     return;
   }
 
-  const isMal  = prediction === "MALICIOUS";
-  const title  = isMal ? "Why is this dangerous?" : "Why is this safe?";
+  const isMal = prediction === "MALICIOUS";
+  const title = isMal ? "Why is this dangerous?" : "Why is this safe?";
   const dotCls = isMal ? "mal" : "ben";
 
   const items = reasons.map((reason, i) => `
@@ -139,6 +136,17 @@ function renderReasons(reasons, prediction) {
       <div class="explain-list">${items}</div>
     </div>
   `;
+}
+
+function renderLoading() {
+  document.getElementById("explain-content").innerHTML = `
+    <div class="explain-section">
+      <div class="explain-title">Analysing reasons…</div>
+      <div style="padding:8px 0;color:var(--c-muted);font-size:12px;">
+        <div class="spinner" style="width:16px;height:16px;margin:0 0 6px 0;"></div>
+        Fetching explanation…
+      </div>
+    </div>`;
 }
 
 function renderError(msg) {
@@ -168,45 +176,77 @@ async function run() {
 
   const apiBase = await getApiBase();
 
-  // Check session cache
-  let prediction;
+  // ── Step 1: Check session cache ───────────────────────────────────────────
+  let cached;
   try {
-    const store  = await chrome.storage.session.get(`tab_${tab.id}`);
-    const cached = store[`tab_${tab.id}`];
-    if (cached && cached.url === url) prediction = cached;
+    const store = await chrome.storage.session.get(`tab_${tab.id}`);
+    cached = store[`tab_${tab.id}`];
   } catch (_) {}
 
-  if (!prediction) {
-    try {
-      prediction     = await callPredict(url, apiBase);
-      prediction.url = url;
-    } catch (err) {
-      renderError(`Could not reach API at ${apiBase}.\nMake sure Flask is running.`);
-      return;
+  // Use cache if it matches current URL and has reasons
+  if (cached && cached.url === url) {
+    renderCard(cached);
+
+    if (cached.prediction === "MALICIOUS") {
+      if (cached.reasons && cached.reasons.length > 0) {
+        // Reasons already cached — show instantly
+        renderReasons(cached.reasons, cached.prediction);
+      } else {
+        // Cache exists but no reasons yet — fetch in background
+        renderLoading();
+        fetchAndRenderReasons(url, apiBase, cached);
+      }
     }
+    return;
+  }
+
+  // ── Step 2: No cache — fetch prediction ───────────────────────────────────
+  let prediction;
+  try {
+    prediction     = await callPredict(url, apiBase);
+    prediction.url = url;
+  } catch (err) {
+    renderError(`Could not reach API at ${apiBase}.\nMake sure Flask is running.`);
+    return;
   }
 
   renderCard(prediction);
 
-  // Fetch LIME explanation for model-classified URLs
-  if (prediction.source === "model") {
-    try {
-      const explained = await callExplain(url, apiBase);
+  if (prediction.source === "model" && prediction.prediction === "MALICIOUS") {
+    renderLoading();
+    fetchAndRenderReasons(url, apiBase, prediction);
+  }
+}
 
-      // Use natural language reasons from backend
-      const reasons = explained.reasons || [];
+async function fetchAndRenderReasons(url, apiBase, prediction) {
+  try {
+    const explained = await callExplain(url, apiBase);
+    const reasons   = explained.reasons || [];
 
-      // Update brand info if explanation has it
-      if (explained.brand_detected && !prediction.brand_detected) {
-        prediction.brand_detected = explained.brand_detected;
-        prediction.real_domain    = explained.real_domain;
-        renderCard(prediction);   // re-render with brand info
-      }
-
-      renderReasons(reasons, prediction.prediction);
-    } catch (_) {
-      // Best-effort — silently ignore
+    // Update brand info if newly available
+    if (explained.brand_detected && !prediction.brand_detected) {
+      prediction.brand_detected = explained.brand_detected;
+      prediction.real_domain    = explained.real_domain;
+      renderCard(prediction);
     }
+
+    renderReasons(reasons, prediction.prediction);
+
+    // Update cache with reasons so next open is instant
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const store = await chrome.storage.session.get(`tab_${tab.id}`);
+      const entry = store[`tab_${tab.id}`] || prediction;
+      entry.reasons = reasons;
+      if (explained.brand_detected) {
+        entry.brand_detected = explained.brand_detected;
+        entry.real_domain    = explained.real_domain;
+      }
+      await chrome.storage.session.set({ [`tab_${tab.id}`]: entry });
+    } catch (_) {}
+
+  } catch (_) {
+    document.getElementById("explain-content").innerHTML = "";
   }
 }
 
