@@ -31,7 +31,7 @@ async function callExplain(url, apiBase) {
   const res = await fetch(`${apiBase}/explain`, {
     method : "POST",
     headers: { "Content-Type": "application/json" },
-    body   : JSON.stringify({ url, num_features: 20 }),
+    body   : JSON.stringify({ url, num_features: 30 }),
   });
   if (!res.ok) throw new Error(`/explain returned HTTP ${res.status}`);
   return res.json();

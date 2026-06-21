@@ -39,7 +39,7 @@ async function getExplanation(url) {
     const res = await fetch(`${api}/explain`, {
       method : "POST",
       headers: { "Content-Type": "application/json" },
-      body   : JSON.stringify({ url, num_features: 20 }),
+      body   : JSON.stringify({ url, num_features: 30 }),
     });
     if (!res.ok) return null;
     return res.json();

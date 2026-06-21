@@ -63,6 +63,7 @@ HEURISTIC_FEATURES: list[str] = [
     "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
     "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
     "brand_in_domain", "leet_in_domain", "brand_hyphen_suspicious",
+    # NEW: 4 domain-level features
     "domain_len", "domain_digit_ratio", "max_domain_digits", "path_depth",
 ]
 
@@ -87,33 +88,32 @@ _PRIVATE_IP_RE = re.compile(
 
 # Brand map: keyword -> display name + real domain
 BRAND_MAP = {
-    "paypal"       : ("PayPal",        "paypal.com"),
-    "amazon"       : ("Amazon",        "amazon.com"),
-    "microsoft"    : ("Microsoft",     "microsoft.com"),
-    "apple"        : ("Apple",         "apple.com"),
-    "google"       : ("Google",        "google.com"),
-    "facebook"     : ("Facebook",      "facebook.com"),
-    "netflix"      : ("Netflix",       "netflix.com"),
+    "paypal"       : ("PayPal",         "paypal.com"),
+    "amazon"       : ("Amazon",         "amazon.com"),
+    "microsoft"    : ("Microsoft",      "microsoft.com"),
+    "apple"        : ("Apple",          "apple.com"),
+    "google"       : ("Google",         "google.com"),
+    "facebook"     : ("Facebook",       "facebook.com"),
+    "netflix"      : ("Netflix",        "netflix.com"),
     "bankofamerica": ("Bank of America","bankofamerica.com"),
-    "wellsfargo"   : ("Wells Fargo",   "wellsfargo.com"),
-    "whatsapp"     : ("WhatsApp",      "whatsapp.com"),
-    "instagram"    : ("Instagram",     "instagram.com"),
-    "twitter"      : ("Twitter",       "twitter.com"),
-    "linkedin"     : ("LinkedIn",      "linkedin.com"),
-    "ebay"         : ("eBay",          "ebay.com"),
-    "visa"         : ("Visa",          "visa.com"),
-    "mastercard"   : ("Mastercard",    "mastercard.com"),
-    "chase"        : ("Chase Bank",    "chase.com"),
-    "citi"         : ("Citibank",      "citibank.com"),
-    "dropbox"      : ("Dropbox",       "dropbox.com"),
-    "steam"        : ("Steam",         "steampowered.com"),
-    "dhl"          : ("DHL",           "dhl.com"),
-    "fedex"        : ("FedEx",         "fedex.com"),
-    "ups"          : ("UPS",           "ups.com"),
+    "wellsfargo"   : ("Wells Fargo",    "wellsfargo.com"),
+    "whatsapp"     : ("WhatsApp",       "whatsapp.com"),
+    "instagram"    : ("Instagram",      "instagram.com"),
+    "twitter"      : ("Twitter",        "twitter.com"),
+    "linkedin"     : ("LinkedIn",       "linkedin.com"),
+    "ebay"         : ("eBay",           "ebay.com"),
+    "visa"         : ("Visa",           "visa.com"),
+    "mastercard"   : ("Mastercard",     "mastercard.com"),
+    "chase"        : ("Chase Bank",     "chase.com"),
+    "citi"         : ("Citibank",       "citibank.com"),
+    "dropbox"      : ("Dropbox",        "dropbox.com"),
+    "steam"        : ("Steam",          "steampowered.com"),
+    "dhl"          : ("DHL",            "dhl.com"),
+    "fedex"        : ("FedEx",          "fedex.com"),
+    "ups"          : ("UPS",            "ups.com"),
 }
 
 # Natural language templates for each feature
-# {brand} is replaced with detected brand name if available
 _NL_TEMPLATES = {
     # Brand impersonation
     "brand_in_domain"        : {
@@ -218,10 +218,47 @@ _NL_TEMPLATES = {
         "mal": "The URL contains an unusually high number of digits",
         "ben": "Digit ratio looks normal",
     },
-    # HTTPS
     "https_flag"             : {
         "mal": "This site does not use HTTPS — your connection may not be secure",
         "ben": "Site uses HTTPS encryption",
+    },
+    # New domain features
+    "domain_len"             : {
+        "mal": "The domain name is unusually short — often seen in newly registered phishing domains",
+        "ben": "Domain name length looks normal",
+    },
+    "domain_digit_ratio"     : {
+        "mal": "The domain name contains an unusually high proportion of digits",
+        "ben": "Domain digit ratio looks normal",
+    },
+    "max_domain_digits"      : {
+        "mal": "The domain name contains a long sequence of digits — a common sign of generated domains",
+        "ben": "No suspicious digit sequences in domain",
+    },
+    "path_depth"             : {
+        "mal": "The URL has an unusually deep path structure — often used to mimic legitimate sites",
+        "ben": "URL path depth looks normal",
+    },
+      "sus_words": {
+    "mal": "The URL contains phishing keywords such as 'security', 'alert', or 'verify'",
+    "ben": "No phishing keywords found",
+    },
+      
+    "brand_in_domain": {
+        "mal": "This site is pretending to be {brand} — the real website is {real_domain}",
+        "ben": "No brand impersonation detected",
+    },
+    "brand_hyphen_suspicious": {
+        "mal": "The domain uses a fake {brand} pattern (e.g. {brand}-security.com)",
+        "ben": "No suspicious brand-hyphen pattern found",
+    },
+    "num_hyphens": {
+        "mal": "The domain contains excessive hyphens which is uncommon in legitimate sites",
+        "ben": "Normal use of hyphens",
+    },
+    "path_depth": {
+        "mal": "The URL has an unusually deep path — often used to mimic legitimate sites",
+        "ben": "URL path depth looks normal",
     },
 }
 
@@ -229,14 +266,10 @@ _NL_TEMPLATES = {
 # ── Brand detection ───────────────────────────────────────────────────────────
 
 def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
-    """
-    Detect which brand is being impersonated in the URL.
-    Returns (display_name, real_domain) or (None, None).
-    """
+    """Detect which brand is being impersonated. Returns (display_name, real_domain)."""
     url_lower = url.lower()
     for keyword, (display_name, real_domain) in BRAND_MAP.items():
         if keyword in url_lower:
-            # Make sure it is NOT the real domain
             host = re.sub(r"^https?://", "", url_lower).split("/")[0]
             reg  = ".".join(host.split(".")[-2:]) if "." in host else host
             if reg != real_domain:
@@ -251,24 +284,18 @@ def feature_to_natural_language(
     brand_name: Optional[str] = None,
     real_domain: Optional[str] = None,
 ) -> Optional[str]:
-    """
-    Convert a LIME feature + weight into a natural language sentence.
-    Returns None for non-interpretable features (char_*, word_*).
-    """
+    """Convert a LIME feature + weight into a natural language sentence."""
+    # Skip n-gram features — not interpretable
     if feature.startswith("char_") or feature.startswith("word_"):
         return None
 
     template = _NL_TEMPLATES.get(feature)
     if not template:
-        # Fallback for unmapped features
-        if weight > 0:
-            return f"Suspicious pattern detected: {feature.replace('_', ' ')}"
-        return None
+        return None   # skip unmapped features entirely — no fallback
 
     direction = "mal" if weight > 0 else "ben"
     sentence  = template[direction]
 
-    # Fill in brand placeholders
     bn = brand_name or "a known brand"
     rd = real_domain or "the official website"
     sentence = sentence.replace("{brand}", bn).replace("{real_domain}", rd)
@@ -304,7 +331,7 @@ def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
                 )
             },
         )
-        final         = resp.url
+        final          = resp.url
         was_redirected = final.rstrip("/") != url.rstrip("/")
         return final, was_redirected
     except Exception:
@@ -337,7 +364,7 @@ def _extract_ip(url: str) -> Optional[str]:
         return None
 
 
-# ── URLClassifier (singleton) ─────────────────────────────────────────────────
+# ── Whitelist ─────────────────────────────────────────────────────────────────
 
 WHITELIST: frozenset[str] = frozenset({
     "163.com",
@@ -761,7 +788,6 @@ WHITELIST: frozenset[str] = frozenset({
     "homedepot.com",
     "hostgator.com",
     "hostgator.com.br",
-    "hotstar.com",
     "hp.com",
     "hstgr.net",
     "huawei.com",
@@ -906,6 +932,7 @@ WHITELIST: frozenset[str] = frozenset({
     "mtgglobals.com",
     "mts.ru",
     "my.com",
+    "mybluehost.me",
     "myfritz.net",
     "myhuaweicloud.com",
     "mynetname.net",
@@ -1016,6 +1043,7 @@ WHITELIST: frozenset[str] = frozenset({
     "pixabay.com",
     "pixiv.net",
     "pki.goog",
+    "playfabapi.com",
     "playrix.com",
     "playstation.com",
     "playstation.net",
@@ -1030,7 +1058,6 @@ WHITELIST: frozenset[str] = frozenset({
     "prodregistryv2.org",
     "pushy.io",
     "pv-cdn.net",
-    "pvp.net",
     "px-cloud.net",
     "pypi.org",
     "python.org",
@@ -1350,6 +1377,8 @@ WHITELIST: frozenset[str] = frozenset({
 })
 
 
+# ── URLClassifier (singleton) ─────────────────────────────────────────────────
+
 class URLClassifier:
     """Thread-safe singleton. Load artefacts once; serve predictions forever."""
 
@@ -1375,7 +1404,7 @@ class URLClassifier:
         self.scaler   = joblib.load(os.path.join(MODELS_DIR, "scaler.joblib"))
 
         with open(os.path.join(MODELS_DIR, "threshold.json")) as fh:
-            self.threshold = float(json.load(fh).get("threshold", 0.44))
+            self.threshold = float(json.load(fh).get("threshold", 0.45))
 
         self._explainer: Optional[object] = None
         self._explainer_lock = threading.Lock()
@@ -1390,16 +1419,19 @@ class URLClassifier:
         return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
     def _feature_vector(self, url: str) -> np.ndarray:
+        """Build the 552-dim feature vector for *url*."""
+        # 52 heuristic features — scale only these
         heuristic = np.array(
             extract_heuristic_features(url), dtype=np.float32
-        ).reshape(1, -1)
-        heuristic_scaled = self.scaler.transform(heuristic).flatten()
+        ).reshape(1, -1)                                                # (1, 52)
+        heuristic_scaled = self.scaler.transform(heuristic).flatten()  # (52,)
 
+        # 300 + 200 NLP features — unscaled
         processed  = preprocess_url_for_nlp(url)
-        char_dense = self.vec_char.transform([processed]).toarray().flatten()
-        word_dense = self.vec_word.transform([processed]).toarray().flatten()
+        char_dense = self.vec_char.transform([processed]).toarray().flatten()  # (300,)
+        word_dense = self.vec_word.transform([processed]).toarray().flatten()  # (200,)
 
-        return np.concatenate([heuristic_scaled, char_dense, word_dense])
+        return np.concatenate([heuristic_scaled, char_dense, word_dense])  # (552,)
 
     def _classify(self, url: str) -> dict:
         try:
@@ -1480,8 +1512,8 @@ class URLClassifier:
         brand_name, real_domain = detect_brand(url)
 
         # Step 5: ML classification
-        result         = self._classify(url)
-        result["url"]  = original_url
+        result        = self._classify(url)
+        result["url"] = original_url
 
         if brand_name:
             result["brand_detected"] = brand_name
@@ -1498,13 +1530,14 @@ class URLClassifier:
 
     # ── Public: LIME explanation ──────────────────────────────────────────────
 
-    def explain_url(self, url: str, num_features: int = 10) -> dict:
+   
+    def explain_url(self, url: str, num_features: int = 30) -> dict:    
         base = self.predict_url(url)
         if base["source"] in ("whitelist", "invalid"):
             return {**base, "explanation": [], "reasons": []}
 
-        brand_name  = base.get("brand_detected")
-        real_domain = base.get("real_domain")
+        brand_name   = base.get("brand_detected")
+        real_domain  = base.get("real_domain")
         classify_url = base.get("unshortened") or url
 
         try:
@@ -1518,15 +1551,16 @@ class URLClassifier:
                 top_labels   = 1,
             )
 
-            raw_list = exp.as_list(label=1)
-
+            raw_list    = exp.as_list(label=1)
             explanation = []
-            reasons     = []   # natural language sentences for non-technical users
+            reasons     = []
 
             for condition_str, weight in raw_list:
                 feat_name = _parse_lime_feature(condition_str)
+                if not feat_name:   # skip unrecognised condition strings
+                    continue
                 feat_idx  = FEATURE_NAMES.index(feat_name) \
-                            if feat_name in FEATURE_NAMES else -1
+                if feat_name in FEATURE_NAMES else -1
                 feat_val  = float(fv[feat_idx]) if feat_idx >= 0 else 0.0
 
                 explanation.append({
@@ -1535,18 +1569,19 @@ class URLClassifier:
                     "value"  : round(feat_val, 6),
                 })
 
-                # Build natural language reason
-                nl = feature_to_natural_language(
-                    feat_name, weight, feat_val,
-                    brand_name, real_domain
-                )
-                if nl and weight > 0:   # only show malicious-direction reasons
-                    reasons.append(nl)
+                # Only add natural language reasons for malicious-direction features
+                if weight > 0:
+                    nl = feature_to_natural_language(
+                        feat_name, weight, feat_val,
+                        brand_name, real_domain
+                    )
+                    if nl:
+                        reasons.append(nl)
 
             explanation.sort(key=lambda x: abs(x["weight"]), reverse=True)
 
-            # Deduplicate reasons, keep top 3
-            seen    = set()
+            # Deduplicate and keep top 3
+            seen        = set()
             top_reasons = []
             for r in reasons:
                 if r not in seen:
@@ -1631,7 +1666,11 @@ def _parse_lime_feature(condition_str: str) -> str:
     for name in sorted(FEATURE_NAMES, key=len, reverse=True):
         if condition_str.startswith(name):
             return name
-    return re.split(r"[\s<>=!]", condition_str)[0]
+    # If condition starts with a number or operator — unrecognised, return empty
+    first = re.split(r"[\s<>=!]", condition_str)[0]
+    if first and (first[0].isdigit() or first[0] in "-+."):
+        return ""   # will be skipped in explain_url
+    return first
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────
