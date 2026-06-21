@@ -2,17 +2,16 @@
  * background.js — Service worker for the Malicious URL Detector extension.
  *
  * On every tab navigation:
- *   1. Calls POST /predict to classify the URL.
- *   2. Stores result in chrome.storage.session keyed by tabId.
- *   3. Updates the extension badge.
- *   4. If MALICIOUS — auto shows Chrome notification + sends banner to content.js
+ *   1. Calls POST /predict to classify the URL
+ *   2. If MALICIOUS — calls POST /explain to get natural language reasons
+ *   3. Caches full result (including reasons) in chrome.storage.session
+ *   4. Updates badge
+ *   5. Shows Chrome notification + content script banner automatically
  */
 
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function getApiBase() {
   return new Promise((resolve) =>
@@ -22,9 +21,8 @@ async function getApiBase() {
   );
 }
 
-async function classifyUrl(url) {
-  const api = await getApiBase();
-  const res  = await fetch(`${api}/predict`, {
+async function classifyUrl(url, api) {
+  const res = await fetch(`${api}/predict`, {
     method : "POST",
     headers: { "Content-Type": "application/json" },
     body   : JSON.stringify({ url }),
@@ -33,8 +31,7 @@ async function classifyUrl(url) {
   return res.json();
 }
 
-async function getExplanation(url) {
-  const api = await getApiBase();
+async function getExplanation(url, api) {
   try {
     const res = await fetch(`${api}/explain`, {
       method : "POST",
@@ -49,46 +46,37 @@ async function getExplanation(url) {
 }
 
 function setBadge(tabId, prediction) {
-  const isMalicious = prediction === "MALICIOUS";
-  chrome.action.setBadgeText({ tabId, text: isMalicious ? "!" : "✓" });
+  const isMal = prediction === "MALICIOUS";
+  chrome.action.setBadgeText({ tabId, text: isMal ? "!" : "✓" });
   chrome.action.setBadgeBackgroundColor({
     tabId,
-    color: isMalicious ? "#E53935" : "#43A047",
+    color: isMal ? "#E53935" : "#43A047",
   });
 }
 
 function isClassifiable(url) {
-  if (!url) return false;
-  return url.startsWith("http://") || url.startsWith("https://");
+  return url && (url.startsWith("http://") || url.startsWith("https://"));
 }
 
-// ── Auto notification when MALICIOUS ─────────────────────────────────────────
-
-function showMaliciousNotification(url, confidence, reasons, brandDetected) {
-  // Build notification message
+function showNotification(url, confidence, reasons, brandDetected) {
   let message = `Confidence: ${confidence.toFixed(1)}%`;
-  if (brandDetected) {
-    message = `Impersonating ${brandDetected} — ${message}`;
-  }
+  if (brandDetected) message = `Impersonating ${brandDetected} — ${message}`;
 
-  // Build reason lines (top 2 from natural language reasons)
   const topReasons = (reasons || []).slice(0, 2);
-  const reasonText = topReasons.length > 0
+  const contextMsg = topReasons.length > 0
     ? topReasons.join(" • ")
     : "Suspicious URL patterns detected";
 
   chrome.notifications.create({
-    type    : "basic",
-    iconUrl : "icons/icon128.png",
-    title   : "⚠ Malicious URL Detected",
-    message : message,
-    contextMessage: reasonText,
-    priority: 2,
+    type             : "basic",
+    iconUrl          : "icons/icon128.png",
+    title            : "⚠ Malicious URL Detected",
+    message          : message,
+    contextMessage   : contextMsg,
+    priority         : 2,
     requireInteraction: false,
   });
 }
-
-// ── Tab listeners ─────────────────────────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
@@ -96,41 +84,34 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (!isClassifiable(url)) return;
 
   try {
-    // Step 1: Get prediction
-    const result  = await classifyUrl(url);
-    result.url    = url;
+    const api    = await getApiBase();
+    const result = await classifyUrl(url, api);
+    result.url   = url;
 
-    // Step 2: If malicious, get explanation for notification
-    let reasons      = [];
+    let reasons       = [];
     let brandDetected = result.brand_detected || null;
 
+    // Fetch explanation immediately in background for MALICIOUS URLs
     if (result.prediction === "MALICIOUS" && result.source === "model") {
-      const explained = await getExplanation(url);
+      const explained = await getExplanation(url, api);
       if (explained) {
-        reasons       = explained.reasons || [];
-        brandDetected = explained.brand_detected || brandDetected;
-        result.reasons = reasons;
+        reasons                = explained.reasons || [];
+        brandDetected          = explained.brand_detected || brandDetected;
+        result.reasons         = reasons;
+        result.brand_detected  = brandDetected;
+        result.real_domain     = explained.real_domain || result.real_domain;
+        result.explanation     = explained.explanation || [];
       }
     }
 
-    // Step 3: Cache result
+    // Cache complete result including reasons
     await chrome.storage.session.set({ [`tab_${tabId}`]: result });
 
-    // Step 4: Update badge
     setBadge(tabId, result.prediction);
 
-    // Step 5: Auto notification + banner if MALICIOUS
     if (result.prediction === "MALICIOUS") {
+      showNotification(url, result.confidence, reasons, brandDetected);
 
-      // Chrome notification (top-right corner)
-      showMaliciousNotification(
-        url,
-        result.confidence,
-        reasons,
-        brandDetected
-      );
-
-      // Content script banner (on the page itself)
       chrome.tabs.sendMessage(tabId, {
         type         : "SHOW_BANNER",
         prediction   : result.prediction,
@@ -139,7 +120,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         reasons      : reasons,
         brandDetected: brandDetected,
       }).catch(() => {});
-
     } else {
       chrome.tabs.sendMessage(tabId, { type: "HIDE_BANNER" }).catch(() => {});
     }
@@ -159,7 +139,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-// Clean up on tab close
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(`tab_${tabId}`);
 });
