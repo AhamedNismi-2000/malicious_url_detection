@@ -5,17 +5,14 @@ Loads model artefacts and exposes three public methods:
 
   predict_url(url)                   -> dict
   predict_batch(urls)                -> list[dict]
-  explain_url(url, num_features=10)  -> dict   (prediction + LIME explanation)
+  explain_url(url, num_features=30)  -> dict   (prediction + LIME explanation)
 
 Extra capabilities:
   - Reverse DNS      : IP-based URLs resolved to domain name before classification
   - Unshortening     : Short URLs (bit.ly etc.) followed to real destination first
   - Brand detection  : Detects which brand is being impersonated
   - Natural language : explain_url() returns user-friendly reason sentences
-
-The URLClassifier is a singleton; import `classifier` directly:
-
-  from model_loader import classifier
+  - Backup reasons   : Rule-based backup ensures at least 3 reasons always shown
 """
 
 import json
@@ -63,7 +60,6 @@ HEURISTIC_FEATURES: list[str] = [
     "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
     "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
     "brand_in_domain", "leet_in_domain", "brand_hyphen_suspicious",
-    # NEW: 4 domain-level features
     "domain_len", "domain_digit_ratio", "max_domain_digits", "path_depth",
 ]
 
@@ -72,6 +68,9 @@ FEATURE_NAMES: list[str] = (
     + [f"char_{i}" for i in range(300)]
     + [f"word_{i}" for i in range(200)]
 )
+
+# Feature index lookup for backup reasons
+_FEAT_IDX = {name: i for i, name in enumerate(HEURISTIC_FEATURES)}
 
 # Boolean/flag features — LIME treats these as categorical
 _CATEGORICAL_FEATURE_NAMES: list[str] = [
@@ -86,7 +85,7 @@ _PRIVATE_IP_RE = re.compile(
     r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1)"
 )
 
-# Brand map: keyword -> display name + real domain
+# Brand map
 BRAND_MAP = {
     "paypal"       : ("PayPal",         "paypal.com"),
     "amazon"       : ("Amazon",         "amazon.com"),
@@ -113,9 +112,8 @@ BRAND_MAP = {
     "ups"          : ("UPS",            "ups.com"),
 }
 
-# Natural language templates for each feature
+# Natural language templates
 _NL_TEMPLATES = {
-    # Brand impersonation
     "brand_in_domain"        : {
         "mal": "This site is pretending to be {brand} — the real website is {real_domain}",
         "ben": "No brand impersonation detected",
@@ -144,7 +142,6 @@ _NL_TEMPLATES = {
         "mal": "The URL uses digit substitutions to disguise words (leet speak)",
         "ben": "No leet speak detected",
     },
-    # Domain / TLD signals
     "risky_tld"              : {
         "mal": "This site uses a high-risk domain ending commonly used for phishing",
         "ben": "Domain ending appears legitimate",
@@ -177,9 +174,8 @@ _NL_TEMPLATES = {
         "mal": "The domain uses punycode encoding to impersonate a legitimate website",
         "ben": "Punycode usage looks normal",
     },
-    # URL structure
     "sus_words"              : {
-        "mal": "The URL contains phishing keywords such as 'verify', 'suspend', or 'urgent'",
+        "mal": "The URL contains phishing keywords such as 'security', 'alert', or 'verify'",
         "ben": "No phishing keywords found",
     },
     "url_entropy"            : {
@@ -222,7 +218,6 @@ _NL_TEMPLATES = {
         "mal": "This site does not use HTTPS — your connection may not be secure",
         "ben": "Site uses HTTPS encryption",
     },
-    # New domain features
     "domain_len"             : {
         "mal": "The domain name is unusually short — often seen in newly registered phishing domains",
         "ben": "Domain name length looks normal",
@@ -239,34 +234,30 @@ _NL_TEMPLATES = {
         "mal": "The URL has an unusually deep path structure — often used to mimic legitimate sites",
         "ben": "URL path depth looks normal",
     },
-      "sus_words": {
-    "mal": "The URL contains phishing keywords such as 'security', 'alert', or 'verify'",
-    "ben": "No phishing keywords found",
-    },
-      
-    "brand_in_domain": {
-        "mal": "This site is pretending to be {brand} — the real website is {real_domain}",
-        "ben": "No brand impersonation detected",
-    },
-    "brand_hyphen_suspicious": {
-        "mal": "The domain uses a fake {brand} pattern (e.g. {brand}-security.com)",
-        "ben": "No suspicious brand-hyphen pattern found",
-    },
-    "num_hyphens": {
-        "mal": "The domain contains excessive hyphens which is uncommon in legitimate sites",
-        "ben": "Normal use of hyphens",
-    },
-    "path_depth": {
-        "mal": "The URL has an unusually deep path — often used to mimic legitimate sites",
-        "ben": "URL path depth looks normal",
-    },
 }
+
+# Backup rule-based checks — ordered by importance
+# (feature_name, min_value_to_trigger, sentence_template)
+_BACKUP_CHECKS = [
+    ("brand_in_domain",         0.5, "This site is pretending to be {brand} — the real website is {real_domain}"),
+    ("brand_hyphen_suspicious",  0.5, "The domain uses a fake {brand} pattern (e.g. {brand}-security.com)"),
+    ("sus_words",                0.5, "The URL contains phishing keywords such as 'security', 'alert', or 'verify'"),
+    ("brand_mismatch",           0.5, "{brand} name appears in the URL but this is not the real {brand} website"),
+    ("risky_tld",                0.5, "This site uses a high-risk domain ending commonly used for phishing"),
+    ("leet_in_domain",           0.5, "The domain disguises a brand name using look-alike characters (e.g. amaz0n)"),
+    ("ip_flag",                  0.5, "The site uses a raw IP address instead of a proper domain name"),
+    ("shortened",                0.5, "This is a shortened URL hiding the real destination"),
+    ("puny",                     0.5, "The domain uses international character encoding to disguise its identity"),
+    ("susp_ext",                 0.5, "The URL points to a suspicious file type (e.g. .exe, .zip, .scr)"),
+    ("https_flag",              -0.5, "This site does not use HTTPS — your connection may not be secure"),
+    ("num_hyphens",              2.0, "The domain contains excessive hyphens which is uncommon in legitimate sites"),
+    ("path_depth",               3.0, "The URL has an unusually deep path — often used to mimic legitimate sites"),
+]
 
 
 # ── Brand detection ───────────────────────────────────────────────────────────
 
 def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
-    """Detect which brand is being impersonated. Returns (display_name, real_domain)."""
     url_lower = url.lower()
     for keyword, (display_name, real_domain) in BRAND_MAP.items():
         if keyword in url_lower:
@@ -284,23 +275,53 @@ def feature_to_natural_language(
     brand_name: Optional[str] = None,
     real_domain: Optional[str] = None,
 ) -> Optional[str]:
-    """Convert a LIME feature + weight into a natural language sentence."""
-    # Skip n-gram features — not interpretable
     if feature.startswith("char_") or feature.startswith("word_"):
         return None
-
     template = _NL_TEMPLATES.get(feature)
     if not template:
-        return None   # skip unmapped features entirely — no fallback
-
+        return None   # skip unmapped features entirely
     direction = "mal" if weight > 0 else "ben"
     sentence  = template[direction]
-
     bn = brand_name or "a known brand"
     rd = real_domain or "the official website"
-    sentence = sentence.replace("{brand}", bn).replace("{real_domain}", rd)
+    return sentence.replace("{brand}", bn).replace("{real_domain}", rd)
 
-    return sentence
+
+def _build_backup_reasons(
+    heuristic: list,
+    brand_name: Optional[str],
+    real_domain: Optional[str],
+    existing: set,
+    needed: int,
+) -> list[str]:
+    """
+    Generate rule-based backup reasons from raw heuristic feature values.
+    Used when LIME doesn't surface enough interpretable reasons.
+    """
+    bn      = brand_name or "a known brand"
+    rd      = real_domain or "the official website"
+    reasons = []
+
+    for feat_name, threshold, template in _BACKUP_CHECKS:
+        if len(reasons) >= needed:
+            break
+        idx = _FEAT_IDX.get(feat_name, -1)
+        if idx < 0:
+            continue
+        val = heuristic[idx]
+        # For https_flag — negative threshold means fire when value < threshold
+        if threshold < 0:
+            triggered = val < abs(threshold)
+        else:
+            triggered = val >= threshold
+        if not triggered:
+            continue
+        sentence = template.replace("{brand}", bn).replace("{real_domain}", rd)
+        if sentence not in existing:
+            existing.add(sentence)
+            reasons.append(sentence)
+
+    return reasons
 
 
 # ── Reverse DNS ───────────────────────────────────────────────────────────────
@@ -321,15 +342,9 @@ def reverse_dns(ip: str, timeout: int = 3) -> Optional[str]:
 def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
     try:
         resp = requests.head(
-            url,
-            allow_redirects=True,
-            timeout=timeout,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-                )
-            },
+            url, allow_redirects=True, timeout=timeout,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                     "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"},
         )
         final          = resp.url
         was_redirected = final.rstrip("/") != url.rstrip("/")
@@ -1380,8 +1395,6 @@ WHITELIST: frozenset[str] = frozenset({
 # ── URLClassifier (singleton) ─────────────────────────────────────────────────
 
 class URLClassifier:
-    """Thread-safe singleton. Load artefacts once; serve predictions forever."""
-
     _instance: Optional["URLClassifier"] = None
     _init_lock = threading.Lock()
 
@@ -1419,19 +1432,14 @@ class URLClassifier:
         return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
     def _feature_vector(self, url: str) -> np.ndarray:
-        """Build the 552-dim feature vector for *url*."""
-        # 52 heuristic features — scale only these
         heuristic = np.array(
             extract_heuristic_features(url), dtype=np.float32
-        ).reshape(1, -1)                                                # (1, 52)
-        heuristic_scaled = self.scaler.transform(heuristic).flatten()  # (52,)
-
-        # 300 + 200 NLP features — unscaled
+        ).reshape(1, -1)
+        heuristic_scaled = self.scaler.transform(heuristic).flatten()
         processed  = preprocess_url_for_nlp(url)
-        char_dense = self.vec_char.transform([processed]).toarray().flatten()  # (300,)
-        word_dense = self.vec_word.transform([processed]).toarray().flatten()  # (200,)
-
-        return np.concatenate([heuristic_scaled, char_dense, word_dense])  # (552,)
+        char_dense = self.vec_char.transform([processed]).toarray().flatten()
+        word_dense = self.vec_word.transform([processed]).toarray().flatten()
+        return np.concatenate([heuristic_scaled, char_dense, word_dense])
 
     def _classify(self, url: str) -> dict:
         try:
@@ -1468,7 +1476,6 @@ class URLClassifier:
         resolved_url = None
         unshortened  = None
 
-        # Step 1: Whitelist
         if self._registered_domain(url) in WHITELIST:
             return {
                 "url": original_url, "prediction": "BENIGN",
@@ -1477,7 +1484,6 @@ class URLClassifier:
                 "source": "whitelist",
             }
 
-        # Step 2: Reverse DNS
         ip = _extract_ip(url)
         if ip:
             hostname = reverse_dns(ip)
@@ -1492,8 +1498,6 @@ class URLClassifier:
                         "resolved_ip": hostname,
                     }
                 url = resolved_url
-
-        # Step 3: Unshorten
         elif _is_shortener(url):
             final_url, was_redirected = unshorten_url(url)
             if was_redirected:
@@ -1508,10 +1512,7 @@ class URLClassifier:
                     }
                 url = final_url
 
-        # Step 4: Detect impersonated brand
         brand_name, real_domain = detect_brand(url)
-
-        # Step 5: ML classification
         result        = self._classify(url)
         result["url"] = original_url
 
@@ -1530,8 +1531,7 @@ class URLClassifier:
 
     # ── Public: LIME explanation ──────────────────────────────────────────────
 
-   
-    def explain_url(self, url: str, num_features: int = 30) -> dict:    
+    def explain_url(self, url: str, num_features: int = 30) -> dict:
         base = self.predict_url(url)
         if base["source"] in ("whitelist", "invalid"):
             return {**base, "explanation": [], "reasons": []}
@@ -1539,6 +1539,9 @@ class URLClassifier:
         brand_name   = base.get("brand_detected")
         real_domain  = base.get("real_domain")
         classify_url = base.get("unshortened") or url
+
+        # Always extract raw heuristic features for backup reasons
+        raw_heuristic = extract_heuristic_features(classify_url)
 
         try:
             explainer = self._get_explainer()
@@ -1554,14 +1557,15 @@ class URLClassifier:
             raw_list    = exp.as_list(label=1)
             explanation = []
             reasons     = []
+            seen        = set()
 
             for condition_str, weight in raw_list:
                 feat_name = _parse_lime_feature(condition_str)
-                if not feat_name:   # skip unrecognised condition strings
+                if not feat_name:
                     continue
-                feat_idx  = FEATURE_NAMES.index(feat_name) \
-                if feat_name in FEATURE_NAMES else -1
-                feat_val  = float(fv[feat_idx]) if feat_idx >= 0 else 0.0
+                feat_idx = FEATURE_NAMES.index(feat_name) \
+                           if feat_name in FEATURE_NAMES else -1
+                feat_val = float(fv[feat_idx]) if feat_idx >= 0 else 0.0
 
                 explanation.append({
                     "feature": feat_name,
@@ -1569,31 +1573,36 @@ class URLClassifier:
                     "value"  : round(feat_val, 6),
                 })
 
-                # Only add natural language reasons for malicious-direction features
                 if weight > 0:
                     nl = feature_to_natural_language(
                         feat_name, weight, feat_val,
                         brand_name, real_domain
                     )
-                    if nl:
+                    if nl and nl not in seen:
+                        seen.add(nl)
                         reasons.append(nl)
 
             explanation.sort(key=lambda x: abs(x["weight"]), reverse=True)
 
-            # Deduplicate and keep top 3
-            seen        = set()
-            top_reasons = []
-            for r in reasons:
-                if r not in seen:
-                    seen.add(r)
-                    top_reasons.append(r)
-                if len(top_reasons) == 3:
-                    break
+            # Keep top 3 from LIME
+            top_reasons = reasons[:3]
+
+            # Fill remaining slots with rule-based backup reasons
+            if len(top_reasons) < 3:
+                backup = _build_backup_reasons(
+                    raw_heuristic, brand_name, real_domain,
+                    set(top_reasons), 3 - len(top_reasons)
+                )
+                top_reasons.extend(backup)
 
             return {**base, "explanation": explanation, "reasons": top_reasons}
 
         except Exception as exc:
-            return {**base, "explanation": [], "reasons": [],
+            # On LIME failure — use pure rule-based reasons
+            backup = _build_backup_reasons(
+                raw_heuristic, brand_name, real_domain, set(), 3
+            )
+            return {**base, "explanation": [], "reasons": backup,
                     "explain_error": str(exc)}
 
     # ── LIME internals ────────────────────────────────────────────────────────
@@ -1666,10 +1675,10 @@ def _parse_lime_feature(condition_str: str) -> str:
     for name in sorted(FEATURE_NAMES, key=len, reverse=True):
         if condition_str.startswith(name):
             return name
-    # If condition starts with a number or operator — unrecognised, return empty
     first = re.split(r"[\s<>=!]", condition_str)[0]
+    # If starts with digit or operator — unrecognised condition
     if first and (first[0].isdigit() or first[0] in "-+."):
-        return ""   # will be skipped in explain_url
+        return ""
     return first
 
 
