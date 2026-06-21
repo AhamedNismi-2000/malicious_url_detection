@@ -13,8 +13,10 @@ env/
 .vscode/
 
 # Data directories
-data/
+
 processed/
+splits/
+tranco_top1000.txt
 
 features/
 # Logs
