@@ -71,7 +71,7 @@ BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPLITS_DIR   = os.path.join(BASE_DIR, "data", "splits")
 FEATURES_DIR = os.path.join(BASE_DIR, "features")
 MODELS_DIR   = os.path.join(BASE_DIR, "models")
-TRANCO_PATH  = os.path.join(BASE_DIR, "data", "raw ", "tranco_top1m.csv")
+TRANCO_PATH  = os.path.join(BASE_DIR, "data", "raw ", "top-1m.csv")
 
 os.makedirs(FEATURES_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,   exist_ok=True)
