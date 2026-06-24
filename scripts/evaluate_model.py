@@ -84,14 +84,16 @@ SAVE_DPI = 200
 
 
 def save(fig, name):
-    """Save figure as both PNG and PDF."""
-    for ext in ("png", "pdf"):
-        path = os.path.join(RESULTS_DIR, f"{name}.{ext}")
-        fig.savefig(path, dpi=SAVE_DPI, bbox_inches="tight",
-                    facecolor=fig.get_facecolor())
-    print(f"  ✓  {name}.png / .pdf")
+    """Save figure as PNG only."""
+    path = os.path.join(RESULTS_DIR, f"{name}.png")
+    fig.savefig(
+        path,
+        dpi=SAVE_DPI,
+        bbox_inches="tight",
+        facecolor=fig.get_facecolor()
+    )
+    print(f"  ✓  {name}.png")
     plt.close(fig)
-
 
 # ── Load artefacts ────────────────────────────────────────────────────────────
 
@@ -447,7 +449,7 @@ def main():
     print_report(y, y_pred, metrics)
 
     print(f"\nAll plots saved to: {RESULTS_DIR}")
-    print("Formats: PNG (reports/slides) + PDF (LaTeX/paper)\n")
+    print("Formats: PNG only\n")
 
 
 if __name__ == "__main__":

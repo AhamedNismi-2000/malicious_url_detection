@@ -5,14 +5,23 @@ Loads model artefacts and exposes three public methods:
 
   predict_url(url)                   -> dict
   predict_batch(urls)                -> list[dict]
-  explain_url(url, num_features=30)  -> dict   (prediction + LIME explanation)
+  explain_url(url, num_features=30)  -> dict
 
-Extra capabilities:
-  - Reverse DNS      : IP-based URLs resolved to domain name before classification
-  - Unshortening     : Short URLs (bit.ly etc.) followed to real destination first
-  - Brand detection  : Detects which brand is being impersonated
-  - Natural language : explain_url() returns user-friendly reason sentences
-  - Backup reasons   : Rule-based backup ensures at least 3 reasons always shown
+Prediction pipeline:
+  Layer 0: Whitelist check
+  Layer 1: Google Safe Browsing API (known threats)
+  Layer 2: ML Model (Random Forest 558 features)
+  Layer 3: Post-prediction confidence adjustment
+
+Fixes applied:
+  - FIX 1: https_flag backup threshold -0.1
+  - FIX 2: explain_url skips https_flag when site has HTTPS
+  - FIX 3: feature_to_natural_language validates flag values
+  - FIX 4: _classify reduces confidence for clean HTTP sites
+  - FIX 5: brand reason skipped when no brand detected
+  - FIX 6: Google Safe Browsing API layer added
+  - FIX 7: WHOIS removed — uses http_no_brand_no_age feature instead
+  - FIX 8: Updated for 558 features (new feature_extraction.py)
 """
 
 import json
@@ -28,7 +37,14 @@ import joblib
 import numpy as np
 import requests
 
-# ── Locate project root and add scripts/ to path ─────────────────────────────
+# Load .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# ── Locate project root ───────────────────────────────────────────────────────
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT    = os.path.abspath(os.path.join(_APP_DIR, ".."))
 _SCRIPTS = os.path.join(_ROOT, "scripts")
@@ -38,54 +54,44 @@ if _SCRIPTS not in sys.path:
 
 from feature_extraction import (
     extract_heuristic_features,
-    preprocess_url_for_nlp,
+    segment_url,
     SHORTENERS,
+    HEURISTIC_FEATURE_NAMES,
+    N_HEURISTIC,
 )
 
 # ── Path constants ────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(_ROOT, "models")
 DATA_DIR   = os.path.join(_ROOT, "data")
 
-# ── Feature names (must match training order) ─────────────────────────────────
-HEURISTIC_FEATURES: list[str] = [
-    "url_len", "path_len", "num_dots", "path_dots", "num_hyphens",
-    "num_underscores", "num_at", "num_qmark", "num_equal", "num_amp",
-    "num_percent", "num_digits", "num_letters", "num_subdirs", "num_frag",
-    "num_special", "num_repeating", "num_upper", "num_non_ascii",
-    "num_slashes", "num_params", "ratio_digits", "ratio_letters",
-    "url_entropy", "ip_flag", "subdomain_parts", "has_multi_subdomain",
-    "tld_len", "risky_tld", "https_flag", "shortened", "sus_words",
-    "brand_mismatch", "puny", "susp_ext", "suspicious_port",
-    "max_consonants", "max_vowels", "max_digits",
-    "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
-    "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
-    "brand_in_domain", "leet_in_domain", "brand_hyphen_suspicious",
-    "domain_len", "domain_digit_ratio", "max_domain_digits", "path_depth",
-]
+# ── Google Safe Browsing API ──────────────────────────────────────────────────
+GSB_API_KEY = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY", "")
+GSB_URL     = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+
+# ── Feature names — must match feature_extraction.py exactly ─────────────────
+HEURISTIC_FEATURES: list[str] = HEURISTIC_FEATURE_NAMES  # 56 features
 
 FEATURE_NAMES: list[str] = (
     HEURISTIC_FEATURES
     + [f"char_{i}" for i in range(300)]
-    + [f"word_{i}" for i in range(200)]
+    + [f"word_{i}" for i in range(202)]
 )
 
-# Feature index lookup for backup reasons
 _FEAT_IDX = {name: i for i, name in enumerate(HEURISTIC_FEATURES)}
 
-# Boolean/flag features — LIME treats these as categorical
 _CATEGORICAL_FEATURE_NAMES: list[str] = [
     "ip_flag", "has_multi_subdomain", "risky_tld", "https_flag",
     "shortened", "sus_words", "brand_mismatch", "puny", "susp_ext",
     "suspicious_port", "brand_in_domain", "leet_in_domain",
-    "brand_hyphen_suspicious",
+    "brand_hyphen_suspicious", "has_redirect", "double_slash_in_path",
+    "abnormal_subdomain", "http_no_brand_no_age",
 ]
 
-# Private IP ranges
 _PRIVATE_IP_RE = re.compile(
     r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1)"
 )
 
-# Brand map
+# ── Brand map ─────────────────────────────────────────────────────────────────
 BRAND_MAP = {
     "paypal"       : ("PayPal",         "paypal.com"),
     "amazon"       : ("Amazon",         "amazon.com"),
@@ -112,7 +118,7 @@ BRAND_MAP = {
     "ups"          : ("UPS",            "ups.com"),
 }
 
-# Natural language templates
+# ── Natural language templates ────────────────────────────────────────────────
 _NL_TEMPLATES = {
     "brand_in_domain"        : {
         "mal": "This site is pretending to be {brand} — the real website is {real_domain}",
@@ -218,6 +224,10 @@ _NL_TEMPLATES = {
         "mal": "This site does not use HTTPS — your connection may not be secure",
         "ben": "Site uses HTTPS encryption",
     },
+    "http_no_brand_no_age"   : {
+        "mal": "This site uses HTTP without HTTPS and shows other suspicious signals",
+        "ben": "Site connection appears normal",
+    },
     "domain_len"             : {
         "mal": "The domain name is unusually short — often seen in newly registered phishing domains",
         "ben": "Domain name length looks normal",
@@ -234,12 +244,23 @@ _NL_TEMPLATES = {
         "mal": "The URL has an unusually deep path structure — often used to mimic legitimate sites",
         "ben": "URL path depth looks normal",
     },
+    "has_redirect"           : {
+        "mal": "The URL contains a redirect parameter — often used to send users to malicious sites",
+        "ben": "No suspicious redirect parameters found",
+    },
+    "double_slash_in_path"   : {
+        "mal": "The URL path contains double slashes — a common obfuscation technique",
+        "ben": "URL path structure looks normal",
+    },
+    "abnormal_subdomain"     : {
+        "mal": "The subdomain contains suspicious patterns such as random digits or hex strings",
+        "ben": "Subdomain looks normal",
+    },
 }
 
-# Backup rule-based checks — ordered by importance
-# (feature_name, min_value_to_trigger, sentence_template)
+# ── Backup rule-based checks ──────────────────────────────────────────────────
 _BACKUP_CHECKS = [
-    ("brand_in_domain",         0.5, "This site is pretending to be {brand} — the real website is {real_domain}"),
+    ("brand_in_domain",          0.5, "This site is pretending to be {brand} — the real website is {real_domain}"),
     ("brand_hyphen_suspicious",  0.5, "The domain uses a fake {brand} pattern (e.g. {brand}-security.com)"),
     ("sus_words",                0.5, "The URL contains phishing keywords such as 'security', 'alert', or 'verify'"),
     ("brand_mismatch",           0.5, "{brand} name appears in the URL but this is not the real {brand} website"),
@@ -249,10 +270,57 @@ _BACKUP_CHECKS = [
     ("shortened",                0.5, "This is a shortened URL hiding the real destination"),
     ("puny",                     0.5, "The domain uses international character encoding to disguise its identity"),
     ("susp_ext",                 0.5, "The URL points to a suspicious file type (e.g. .exe, .zip, .scr)"),
-    ("https_flag",              -0.5, "This site does not use HTTPS — your connection may not be secure"),
+    ("has_redirect",             0.5, "The URL contains a redirect parameter — often used in phishing attacks"),
+    ("double_slash_in_path",     0.5, "The URL path contains double slashes — a common obfuscation technique"),
+    ("abnormal_subdomain",       0.5, "The subdomain contains suspicious patterns such as random digits"),
+    ("http_no_brand_no_age",     0.5, "This site uses HTTP without HTTPS and shows other suspicious signals"),
+    # FIX 1: threshold -0.1 so only fires when https_flag truly 0
+    ("https_flag",              -0.1, "This site does not use HTTPS — your connection may not be secure"),
     ("num_hyphens",              2.0, "The domain contains excessive hyphens which is uncommon in legitimate sites"),
     ("path_depth",               3.0, "The URL has an unusually deep path — often used to mimic legitimate sites"),
 ]
+
+
+# ── Google Safe Browsing ──────────────────────────────────────────────────────
+
+def check_google_safe_browsing(url: str) -> tuple[bool, str]:
+    """
+    Returns (is_malicious, threat_type)
+    Checks URL against Google Safe Browsing API.
+    Returns False if API key not configured.
+    """
+    if not GSB_API_KEY:
+        return False, ""
+    try:
+        payload = {
+            "client": {
+                "clientId":      "malicious-url-detector",
+                "clientVersion": "1.0.0"
+            },
+            "threatInfo": {
+                "threatTypes": [
+                    "MALWARE",
+                    "SOCIAL_ENGINEERING",
+                    "UNWANTED_SOFTWARE",
+                    "POTENTIALLY_HARMFUL_APPLICATION"
+                ],
+                "platformTypes":    ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries":    [{"url": url}]
+            }
+        }
+        response = requests.post(
+            f"{GSB_URL}?key={GSB_API_KEY}",
+            json=payload,
+            timeout=5
+        )
+        data = response.json()
+        if data.get("matches"):
+            threat_type = data["matches"][0].get("threatType", "MALICIOUS")
+            return True, threat_type
+        return False, ""
+    except Exception:
+        return False, ""
 
 
 # ── Brand detection ───────────────────────────────────────────────────────────
@@ -268,6 +336,8 @@ def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+# ── Natural language explanation ──────────────────────────────────────────────
+
 def feature_to_natural_language(
     feature: str,
     weight: float,
@@ -277,9 +347,40 @@ def feature_to_natural_language(
 ) -> Optional[str]:
     if feature.startswith("char_") or feature.startswith("word_"):
         return None
+
+    # FIX 5: skip brand reasons when no brand detected
+    if brand_name is None and weight > 0 and any(x in feature for x in
+        ["brand", "visual_brand"]):
+        return None
+
+    # FIX 3: never show malicious reason when flag is actually clean
+    _flag_sanity = {
+        "https_flag"             : lambda v: v != 1.0,
+        "ip_flag"                : lambda v: v != 0.0,
+        "risky_tld"              : lambda v: v != 0.0,
+        "shortened"              : lambda v: v != 0.0,
+        "brand_in_domain"        : lambda v: v != 0.0,
+        "leet_in_domain"         : lambda v: v != 0.0,
+        "brand_hyphen_suspicious": lambda v: v != 0.0,
+        "brand_mismatch"         : lambda v: v != 0.0,
+        "puny"                   : lambda v: v != 0.0,
+        "susp_ext"               : lambda v: v != 0.0,
+        "suspicious_port"        : lambda v: v != 0.0,
+        "sus_words"              : lambda v: v != 0.0,
+        "has_redirect"           : lambda v: v != 0.0,
+        "double_slash_in_path"   : lambda v: v != 0.0,
+        "abnormal_subdomain"     : lambda v: v != 0.0,
+        "http_no_brand_no_age"   : lambda v: v != 0.0,
+    }
+
+    if weight > 0:
+        check = _flag_sanity.get(feature)
+        if check and not check(value):
+            return None
+
     template = _NL_TEMPLATES.get(feature)
     if not template:
-        return None   # skip unmapped features entirely
+        return None
     direction = "mal" if weight > 0 else "ben"
     sentence  = template[direction]
     bn = brand_name or "a known brand"
@@ -294,10 +395,6 @@ def _build_backup_reasons(
     existing: set,
     needed: int,
 ) -> list[str]:
-    """
-    Generate rule-based backup reasons from raw heuristic feature values.
-    Used when LIME doesn't surface enough interpretable reasons.
-    """
     bn      = brand_name or "a known brand"
     rd      = real_domain or "the official website"
     reasons = []
@@ -309,13 +406,19 @@ def _build_backup_reasons(
         if idx < 0:
             continue
         val = heuristic[idx]
-        # For https_flag — negative threshold means fire when value < threshold
+
         if threshold < 0:
             triggered = val < abs(threshold)
         else:
             triggered = val >= threshold
         if not triggered:
             continue
+
+        # FIX 5: skip brand-related reasons when no brand detected
+        if brand_name is None and any(x in feat_name for x in
+            ["brand", "leet", "visual"]):
+            continue
+
         sentence = template.replace("{brand}", bn).replace("{real_domain}", rd)
         if sentence not in existing:
             existing.add(sentence)
@@ -381,1015 +484,40 @@ def _extract_ip(url: str) -> Optional[str]:
 
 # ── Whitelist ─────────────────────────────────────────────────────────────────
 
-WHITELIST: frozenset[str] = frozenset({
-    "163.com",
-    "1rx.io",
-    "2gis.com",
-    "2mdn.net",
-    "360.cn",
-    "360safe.com",
-    "360yield.com",
-    "3gppnetwork.org",
-    "3lift.com",
-    "4dex.io",
-    "a-mo.net",
-    "a-msedge.net",
-    "a2z.com",
-    "aaplimg.com",
-    "aboutads.info",
-    "abovedomains.com",
-    "academia.edu",
-    "accuweather.com",
-    "addtoany.com",
-    "adform.net",
-    "adgrx.com",
-    "adguard-vpn.online",
-    "adjust.com",
-    "adobe.com",
-    "adobe.io",
-    "adobe.net",
-    "adobedc.net",
-    "adobedtm.com",
-    "adriver.ru",
-    "adsrvr.org",
-    "adtrafficquality.google",
-    "afafb.com",
-    "afilias-nst.info",
-    "afilias-nst.org",
-    "afternic.com",
-    "agkn.com",
-    "agoda.com",
-    "agora.io",
-    "airbnb.com",
-    "aiv-delivery.net",
-    "akahost.net",
-    "akam.net",
-    "akamaiedge.net",
-    "akamaihd.net",
-    "akamaitech.net",
-    "alibaba.com",
-    "alibabadns.com",
-    "alicdn.com",
-    "alidns.com",
-    "aliexpress.com",
-    "alipaydns.com",
-    "aliyun.com",
-    "aliyuncs.com",
-    "aliyuncsslbintl.com",
-    "allaboutcookies.org",
-    "allawnos.com",
-    "allegro.pl",
-    "amagi.tv",
-    "amazon.ca",
-    "amazon.co.jp",
-    "amazon.co.uk",
-    "amazon.com",
-    "amazon.com.au",
-    "amazon.com.br",
-    "amazon.com.mx",
-    "amazon.de",
-    "amazon.dev",
-    "amazon.es",
-    "amazon.fr",
-    "amazon.in",
-    "amazon.it",
-    "amazonalexa.com",
-    "amazonaws.com",
-    "amazontrust.com",
-    "amazonvideo.com",
-    "ameblo.jp",
-    "amemv.com",
-    "ampproject.org",
-    "amzn.to",
-    "ancestry.com",
-    "android.com",
-    "anthropic.com",
-    "anydesk.com",
-    "aol.com",
-    "apache.org",
-    "apnews.com",
-    "app-analytics-services-att.com",
-    "app-analytics-services.com",
-    "app-measurement.com",
-    "appcenter.ms",
-    "apple-dns.net",
-    "apple.com",
-    "applovin.com",
-    "appsflyer.com",
-    "appsflyersdk.com",
-    "appspot.com",
-    "arcgis.com",
-    "archive.org",
-    "arubanetworks.com",
-    "arxiv.org",
-    "asus.com",
-    "atlassian.com",
-    "atlassian.net",
-    "att.net",
-    "autodesk.com",
-    "avast.com",
-    "avcdn.net",
-    "avito.ru",
-    "avsxappcaptiveportal.com",
-    "aws.amazon.com",
-    "aws.dev",
-    "awsglobalaccelerator.com",
-    "awswaf.com",
-    "ax-msedge.net",
-    "azure-devices.net",
-    "azure-dns.com",
-    "azure.com",
-    "azure.microsoft.com",
-    "azureedge.net",
-    "azurefd.net",
-    "azurewebsites.net",
-    "b-cdn.net",
-    "b-msedge.net",
-    "baidu.com",
-    "bamgrid.com",
-    "bandcamp.com",
-    "bankofamerica.com",
-    "bbc.co.uk",
-    "bbc.com",
-    "bdydns.com",
-    "behance.net",
-    "beian.gov.cn",
-    "berkeley.edu",
-    "bestbuy.com",
-    "beyondwickedmapping.org",
-    "biblegateway.com",
-    "bidmachine.io",
-    "bidr.io",
-    "bidswitch.net",
-    "bild.de",
-    "bilibili.com",
-    "binance.com",
-    "bing.com",
-    "bitrix24.ru",
-    "blackberry.com",
-    "blackhub.team",
-    "blogger.com",
-    "blogspot.com",
-    "bloomberg.com",
-    "bluehost.com",
-    "bol.com",
-    "booking.com",
-    "box.com",
-    "branch.io",
-    "brave.com",
-    "braze.com",
-    "britannica.com",
-    "browser-intake-datadoghq.com",
-    "bsky.app",
-    "btloader.com",
-    "bugsnag.com",
-    "bunnyinfra.net",
-    "businessinsider.com",
-    "bx-msedge.net",
-    "bytedns1.com",
-    "bytefcdn-oversea.com",
-    "bytefcdn-ttpus.com",
-    "bytefcdn.com",
-    "byteglb.com",
-    "byteoversea.net",
-    "ca.gov",
-    "caixa.gov.br",
-    "calendly.com",
-    "cambridge.org",
-    "canva.com",
-    "capcut.com",
-    "capcutapi.com",
-    "cbsnews.com",
-    "cdc.gov",
-    "cdn-apple.com",
-    "cdn-vk.ru",
-    "cdn20.com",
-    "cdn77.org",
-    "cdnbuild.net",
-    "cdngslb.com",
-    "cdnhwc1.com",
-    "cdnhwc2.com",
-    "cdninstagram.com",
-    "cdnvideo.ru",
-    "change.org",
-    "character.ai",
-    "chatgpt.com",
-    "chaturbate.com",
-    "checkpoint.com",
-    "chess.com",
-    "chinamobile.com",
-    "ci-servers.net",
-    "ci-servers.org",
-    "cisco.com",
-    "clarity.ms",
-    "claude.ai",
-    "clever.com",
-    "cloud.google.com",
-    "cloud.microsoft",
-    "cloudflare-dns.com",
-    "cloudflare.com",
-    "cloudflare.net",
-    "cloudflareinsights.com",
-    "cloudinary.com",
-    "cloudns.net",
-    "cloudsink.net",
-    "cmediahub.ru",
-    "cnbc.com",
-    "cnet.com",
-    "cnn.com",
-    "columbia.edu",
-    "comcast.com",
-    "comcast.net",
-    "consultant.ru",
-    "contentsquare.net",
-    "conviva.com",
-    "cookiedatabase.org",
-    "cookielaw.org",
-    "cornell.edu",
-    "corriere.it",
-    "costco.com",
-    "coupang.com",
-    "coursera.org",
-    "cpanel.net",
-    "crashlytics.com",
-    "creativecdn.com",
-    "creativecommons.org",
-    "criteo.net",
-    "crpt.ru",
-    "crwdcntrl.net",
-    "cursor.sh",
-    "dailymail.co.uk",
-    "dailymotion.com",
-    "datadoghq.com",
-    "daum.net",
-    "dbankcloud.com",
-    "dbankcloud.ru",
-    "ddnss.de",
-    "debian.org",
-    "deepl.com",
-    "deere.com",
-    "dell.com",
-    "deloitte.com",
-    "demdex.net",
-    "deviantart.com",
-    "digicert.com",
-    "digitalocean.com",
-    "digitaloceanspaces.com",
-    "discogs.com",
-    "discord.com",
-    "discord.gg",
-    "discord.media",
-    "discordapp.com",
-    "disneyplus.com",
-    "disqus.com",
-    "dns-parking.com",
-    "dns.google",
-    "dnsmadeeasy.com",
-    "dnsowl.com",
-    "dnspod.net",
-    "docker.com",
-    "docker.io",
-    "docomo.ne.jp",
-    "doi.org",
-    "domaincontrol.com",
-    "dotaplabs.net",
-    "dotomi.com",
-    "doubleverify.com",
-    "douyincdn.com",
-    "dreamhost.com",
-    "drom.ru",
-    "dropbox.com",
-    "dropcatch.com",
-    "dtkn.ru",
-    "dual-s-msedge.net",
-    "duckdns.org",
-    "duckduckgo.com",
-    "duolingo.com",
-    "dv.tech",
-    "dynatrace.com",
-    "dyndns.org",
-    "dzen.ru",
-    "e2ro.com",
-    "ea.com",
-    "easebar.com",
-    "ebay.co.uk",
-    "ebay.com",
-    "ebay.de",
-    "ecosia.org",
-    "edgcdn.net",
-    "edgecdn.ru",
-    "eeroup.com",
-    "elasticbeanstalk.com",
-    "elmundo.es",
-    "elpais.com",
-    "enacdn.net",
-    "epa.gov",
-    "epicgames.com",
-    "eporner.com",
-    "erome.com",
-    "eset.com",
-    "espn.com",
-    "etsy.com",
-    "eu-1-id5-sync.com",
-    "eu.com",
-    "europa.eu",
-    "eventbrite.com",
-    "everesttech.net",
-    "example.com",
-    "exp-tas.com",
-    "expireddomains.com",
-    "eye4.cn",
-    "ezviz7.com",
-    "ezvizlife.com",
-    "f5.com",
-    "facebook.com",
-    "facebook.net",
-    "fandom.com",
-    "faphouse.com",
-    "fast.com",
-    "fastly-edge.com",
-    "fb.com",
-    "fbcdn.net",
-    "fbpigeon.com",
-    "fbsbx.com",
-    "fda.gov",
-    "featureassets.org",
-    "fidelity.com",
-    "figma.com",
-    "firefox.com",
-    "firetvcaptiveportal.com",
-    "fiverr.com",
-    "flashtalking.com",
-    "flickr.com",
-    "flipkart.com",
-    "focus.de",
-    "fontawesome.com",
-    "forbes.com",
-    "force.com",
-    "forms.gle",
-    "forter.com",
-    "foxnews.com",
-    "free.fr",
-    "freepik.com",
-    "frontiersin.org",
-    "ft.com",
-    "fwmrm.net",
-    "g.co",
-    "g.page",
-    "gamepass.com",
-    "gandi-ns.fr",
-    "gandi.net",
-    "garmin.com",
-    "gartner.com",
-    "gcdn.co",
-    "genius.com",
-    "geobasket.ru",
-    "ggpht.com",
-    "giphy.com",
-    "github.com",
-    "github.io",
-    "githubusercontent.com",
-    "gitlab.com",
-    "globalsign.com",
-    "globo.com",
-    "gmail.com",
-    "gnu.org",
-    "go-mpulse.net",
-    "go.com",
-    "godaddy.com",
-    "goodreads.com",
-    "google-analytics.com",
-    "google.cn",
-    "google.co.uk",
-    "google.com",
-    "google.com.br",
-    "google.com.hk",
-    "google.de",
-    "googleapis.com",
-    "googleblog.com",
-    "googledomains.com",
-    "googletagmanager.com",
-    "googletagservices.com",
-    "googleusercontent.com",
-    "googlevideo.com",
-    "googlezip.net",
-    "goskope.com",
-    "gosuslugi.ru",
-    "grammarly.com",
-    "grammarly.io",
-    "gravatar.com",
-    "gstatic.com",
-    "gtld-servers.net",
-    "gumgum.com",
-    "gvt1.com",
-    "gvt2.com",
-    "gwfb.net",
-    "harvard.edu",
-    "hath.network",
-    "hbr.org",
-    "hcaptcha.com",
-    "healthline.com",
-    "herokuapp.com",
-    "herokudns.com",
-    "heytapdl.com",
-    "heytapmobi.com",
-    "heytapmobile.com",
-    "hichina.com",
-    "hicloud.com",
-    "hicloudcam.com",
-    "hihonorcloud.com",
-    "hilton.com",
-    "hm.com",
-    "homedepot.com",
-    "hostgator.com",
-    "hostgator.com.br",
-    "hp.com",
-    "hstgr.net",
-    "huawei.com",
-    "hubspot.com",
-    "huffpost.com",
-    "hugedomains.com",
-    "ibm.com",
-    "ibyteimg.com",
-    "icloud-content.com",
-    "icloud.com",
-    "id5-sync.com",
-    "ieee.org",
-    "ietf.org",
-    "iiko.it",
-    "ikea.com",
-    "imcmdb.net",
-    "imdb.com",
-    "imgsmail.ru",
-    "imgur.com",
-    "immedia-semi.com",
-    "impervadns.net",
-    "imrworldwide.com",
-    "indeed.com",
-    "independent.co.uk",
-    "indiatimes.com",
-    "infobae.com",
-    "inmobi.com",
-    "inner-active.mobi",
-    "instagram.com",
-    "intel.com",
-    "intercom.io",
-    "internetwarriors.net",
-    "intuit.com",
-    "investopedia.com",
-    "ioref.io",
-    "ip-api.com",
-    "ipify.org",
-    "ipv4only.arpa",
-    "irs.gov",
-    "iso.org",
-    "issuu.com",
-    "it.com",
-    "ivi.ru",
-    "jd.com",
-    "jetbrains.com",
-    "jimdo.com",
-    "jomodns.com",
-    "jotform.com",
-    "jquery.com",
-    "jsdelivr.net",
-    "kaspersky-labs.com",
-    "kaspersky.com",
-    "keenetic.io",
-    "kick.com",
-    "kickstarter.com",
-    "klaviyo.com",
-    "kleinanzeigen.de",
-    "kontur.ru",
-    "ks-cdn.com",
-    "kslawin.com",
-    "ksyuncdn.com",
-    "kubernetes.io",
-    "kueezrtb.com",
-    "kunluncan.com",
-    "kwai-pro.com",
-    "kwai.com",
-    "kwai.net",
-    "kwaipros.com",
-    "kwcdn.com",
-    "latimes.com",
-    "launchdarkly.com",
-    "launchpad.net",
-    "lefigaro.fr",
-    "leiniao.com",
-    "lemonde.fr",
-    "lencr.org",
-    "lenovo.com",
-    "lgtvcommon.com",
-    "liadm.com",
-    "libp2p.direct",
-    "licdn.com",
-    "life360.com",
-    "liftoff.io",
-    "lijit.com",
-    "line.me",
-    "linkedin.com",
-    "linktr.ee",
-    "linode.com",
-    "list-manage.com",
-    "live-video.net",
-    "live.com",
-    "live.net",
-    "livejournal.com",
-    "ln-msedge.net",
-    "loc.gov",
-    "lowes.com",
-    "lsrelayaccess.com",
-    "macromedia.com",
-    "mail.ru",
-    "mailchi.mp",
-    "mailchimp.com",
-    "mailinabox.email",
-    "mangosip.ru",
-    "markmonitor.com",
-    "marriott.com",
-    "mayoclinic.org",
-    "mcafee.com",
-    "mckinsey.com",
-    "mdpi.com",
-    "me.com",
-    "media-amazon.com",
-    "mediafire.com",
-    "mediatek.com",
-    "medium.com",
-    "mega.co.nz",
-    "meraki.com",
-    "mercadolibre.com.ar",
-    "mercadolivre.com.br",
-    "merriam-webster.com",
-    "mhverifier.ru",
-    "mi.com",
-    "microsoft.com",
-    "microsoftonline.com",
-    "miit.gov.cn",
-    "mikrotik.com",
-    "mit.edu",
-    "miui.com",
-    "miwifi.com",
-    "mlb.com",
-    "moe.video",
-    "moloco.com",
-    "moneycontrol.com",
-    "mozilla.com",
-    "mozilla.net",
-    "mozilla.org",
-    "msedge.net",
-    "msftauth.net",
-    "msftconnecttest.com",
-    "msftncsi.com",
-    "msidentity.com",
-    "msn.com",
-    "mtgglobals.com",
-    "mts.ru",
-    "my.com",
-    "mybluehost.me",
-    "myfritz.net",
-    "myhuaweicloud.com",
-    "mynetname.net",
-    "myqcloud.com",
-    "myshopify.com",
-    "myspace.com",
-    "mysql.com",
-    "mzstatic.com",
-    "name-services.com",
-    "name.com",
-    "namebrightdns.com",
-    "nasa.gov",
-    "nationalgeographic.com",
-    "nature.com",
-    "naver.com",
-    "nbcnews.com",
-    "ndtv.com",
-    "nease.net",
-    "nel.goog",
-    "nelreports.net",
-    "netangels.ru",
-    "netcraze.io",
-    "netease.com",
-    "netflix.com",
-    "netflix.net",
-    "netgear.com",
-    "networkadvertising.org",
-    "nextcloud.com",
-    "nextlgsdp.com",
-    "nexusmods.com",
-    "nflximg.com",
-    "nflxso.net",
-    "nflxvideo.net",
-    "ngenix.net",
-    "nginx.com",
-    "nginx.org",
-    "nic.direct",
-    "nic.io",
-    "nic.network",
-    "nic.ru",
-    "nih.gov",
-    "nike.com",
-    "nikkei.com",
-    "nintendo.com",
-    "nintendo.net",
-    "nist.gov",
-    "nmrodam.com",
-    "no-ip.com",
-    "noaa.gov",
-    "nominetdns.uk",
-    "note.com",
-    "npmjs.com",
-    "npr.org",
-    "nstld.com",
-    "ntp.org",
-    "nvidia.com",
-    "nypost.com",
-    "nytimes.com",
-    "odoo.com",
-    "office.com",
-    "office.net",
-    "office365.com",
-    "ok.ru",
-    "okcdn.ru",
-    "okta.com",
-    "omtrdc.net",
-    "on.aws",
-    "one.one",
-    "onelink.me",
-    "onesignal.com",
-    "onet.pl",
-    "onetag-sys.com",
-    "onetrust.com",
-    "online-metrix.net",
-    "onlyfans.com",
-    "openai.com",
-    "opendns.com",
-    "openstreetmap.org",
-    "opera-api.com",
-    "opera.com",
-    "optimizely.com",
-    "oracle.com",
-    "oraclecloud.com",
-    "orderbox-dns.com",
-    "otto.de",
-    "oup.com",
-    "outlook.com",
-    "ovh.net",
-    "ovscdns.com",
-    "ox.ac.uk",
-    "oxylabs.io",
-    "ozon.ru",
-    "ozone.ru",
-    "pages.dev",
-    "palmplaystore.com",
-    "paloaltonetworks.com",
-    "pangle.io",
-    "patreon.com",
-    "paypal.com",
-    "pbs.org",
-    "pccc.com",
-    "people.com",
-    "perplexity.ai",
-    "pexels.com",
-    "php.net",
-    "pinimg.com",
-    "pinterest.com",
-    "pixabay.com",
-    "pixiv.net",
-    "pki.goog",
-    "playfabapi.com",
-    "playrix.com",
-    "playstation.com",
-    "playstation.net",
-    "plesk.com",
-    "poki.com",
-    "pornhub.com",
-    "presage.io",
-    "primevideo.com",
-    "princeton.edu",
-    "privacy-mgmt.com",
-    "prnewswire.com",
-    "prodregistryv2.org",
-    "pushy.io",
-    "pv-cdn.net",
-    "px-cloud.net",
-    "pypi.org",
-    "python.org",
-    "qlivecdn.com",
-    "qq.com",
-    "qualtrics.com",
-    "quickconnect.to",
-    "quizlet.com",
-    "quora.com",
-    "rackspace.com",
-    "rackspace.net",
-    "rakuten.co.jp",
-    "rakuten.com",
-    "rambler.ru",
-    "rbxcdn.com",
-    "readthedocs.io",
-    "recaptcha.net",
-    "reddit.com",
-    "redhat.com",
-    "reg.ru",
-    "registrar-servers.com",
-    "repubblica.it",
-    "researchgate.net",
-    "resolver.arpa",
-    "reuters.com",
-    "richaudience.com",
-    "ring.com",
-    "ripn.net",
-    "rlcdn.com",
-    "roblox.com",
-    "rocket-cdn.com",
-    "roku.com",
-    "root-servers.net",
-    "rt.ru",
-    "run.app",
-    "rutube.ru",
-    "ryanair.com",
-    "rzone.de",
-    "safebrowsing.apple",
-    "sagepub.com",
-    "salesforce.com",
-    "samsung.com",
-    "samsungacr.com",
-    "samsungapps.com",
-    "samsungcloud.com",
-    "samsungcloudsolution.com",
-    "samsungcloudsolution.net",
-    "samsungosp.com",
-    "samsungqbe.com",
-    "sberbank.ru",
-    "sc-cdn.net",
-    "sc-gw.com",
-    "scdn.co",
-    "sciencedirect.com",
-    "scribd.com",
-    "sedo.com",
-    "seedtag.com",
-    "segment.io",
-    "selectel.ru",
-    "sendgrid.com",
-    "sentry.io",
-    "service.gov.uk",
-    "seznam.cz",
-    "sfx.ms",
-    "shalltry.com",
-    "share-dns.com",
-    "share.google",
-    "sharepoint.com",
-    "shein.com",
-    "shifen.com",
-    "shopee.co.id",
-    "shopee.com.br",
-    "shopeemobile.com",
-    "shopify.com",
-    "shopifysvc.com",
-    "sina.com.cn",
-    "skyhigh.cloud",
-    "skype.com",
-    "slack.com",
-    "slideshare.net",
-    "smaato.net",
-    "smartthings.com",
-    "smilewanted.com",
-    "snapchat.com",
-    "snapkit.com",
-    "sohu.com",
-    "sophos.com",
-    "soundcloud.com",
-    "sourceforge.net",
-    "spaceweb.pro",
-    "speedtest.net",
-    "spiegel.de",
-    "spo-msedge.net",
-    "spotify.com",
-    "spotifycdn.com",
-    "spov-msedge.net",
-    "springer.com",
-    "squarespace.com",
-    "squarespacedns.com",
-    "ssl-images-amazon.com",
-    "stackadapt.com",
-    "stackoverflow.com",
-    "stanford.edu",
-    "starlink.com",
-    "state.gov",
-    "static.microsoft",
-    "statista.com",
-    "stbid.ru",
-    "steamcommunity.com",
-    "steampowered.com",
-    "steamserver.net",
-    "steamstatic.com",
-    "stripchat.com",
-    "stripe.com",
-    "substack.com",
-    "supercell.com",
-    "supertms.com",
-    "surveymonkey.com",
-    "svc.ms",
-    "synology.com",
-    "t-mobile.com",
-    "t-msedge.net",
-    "t-online.de",
-    "t.me",
-    "tandfonline.com",
-    "taobao.com",
-    "tapad.com",
-    "target.com",
-    "tawk.to",
-    "tbcache.com",
-    "teads.tv",
-    "teamviewer.com",
-    "techcrunch.com",
-    "ted.com",
-    "telecid.ru",
-    "telegram.me",
-    "telegram.org",
-    "telegraph.co.uk",
-    "telekom.de",
-    "telekom.net",
-    "telephony.goog",
-    "temu.com",
-    "tencent-cloud.net",
-    "tencent.com",
-    "theatlantic.com",
-    "theconversation.com",
-    "theguardian.com",
-    "themeforest.net",
-    "thenai.org",
-    "theverge.com",
-    "threads.com",
-    "tiktok.com",
-    "tiktokcdn-eu.com",
-    "tiktokcdn-us.com",
-    "tiktokcdn.com",
-    "tiktokpangle.us",
-    "tiktokrow-cdn.com",
-    "tiktokv.com",
-    "tiktokv.eu",
-    "tiktokv.us",
-    "tiktokw.us",
-    "time.com",
-    "timeweb.ru",
-    "tm-azurefd.net",
-    "tp-link.com",
-    "tplinkcloud.com",
-    "tplinknbu.com",
-    "tradingview.com",
-    "trafficmanager.net",
-    "trbcdn.net",
-    "trendmicro.com",
-    "tripadvisor.com",
-    "triplinkintl.com",
-    "trueconf.net",
-    "trustpilot.com",
-    "tsyndicate.com",
-    "ttdns2.com",
-    "ttvnw.net",
-    "tumblr.com",
-    "turn.com",
-    "twilio.com",
-    "twimg.com",
-    "twitch.tv",
-    "twitter.com",
-    "typeform.com",
-    "typekit.net",
-    "uber.com",
-    "ubi.com",
-    "ubnt.com",
-    "ubuntu.com",
-    "udemy.com",
-    "ui-dns.com",
-    "ui.com",
-    "uk.com",
-    "umich.edu",
-    "un.org",
-    "unesco.org",
-    "unity3d.com",
-    "unpkg.com",
-    "unsplash.com",
-    "uol.com.br",
-    "ups.com",
-    "usatoday.com",
-    "usda.gov",
-    "userapi.com",
-    "usercontent.goog",
-    "usgovcloudapi.net",
-    "usps.com",
-    "vecdnlb.com",
-    "vedcdnlb.com",
-    "vedsalb.com",
-    "vercel-dns-016.com",
-    "vercel-dns-017.com",
-    "vercel.app",
-    "verisign.com",
-    "viber.com",
-    "vidaahub.com",
-    "vimeo.com",
-    "virginm.net",
-    "visualstudio.com",
-    "vivo.com.cn",
-    "vivoglobal.com",
-    "vk-analytics.ru",
-    "vk.com",
-    "vk.ru",
-    "vkontakte.ru",
-    "vkuser.net",
-    "vkuserphoto.ru",
-    "volcfcdndvs.com",
-    "vungle.com",
-    "w3.org",
-    "wa.me",
-    "wac-msedge.net",
-    "walmart.com",
-    "washington.edu",
-    "washingtonpost.com",
-    "wattpad.com",
-    "wb.ru",
-    "wbbasket.ru",
-    "wbx2.com",
-    "weather.com",
-    "webempresa.eu",
-    "webex.com",
-    "webmd.com",
-    "weebly.com",
-    "weforum.org",
-    "weibo.com",
-    "welt.de",
-    "whatsapp.com",
-    "whatsapp.net",
-    "whecloud.com",
-    "whitehouse.gov",
-    "who.int",
-    "wikimedia.org",
-    "wikipedia.org",
-    "wildberries.ru",
-    "wiley.com",
-    "windows.com",
-    "windows.net",
-    "windowsupdate.com",
-    "wired.com",
-    "withgoogle.com",
-    "wix.com",
-    "wixsite.com",
-    "wordpress.com",
-    "wordpress.org",
-    "workers.dev",
-    "worldbank.org",
-    "worldnic.com",
-    "wp.com",
-    "wp.pl",
-    "wpguardian.com",
-    "wpguardian.io",
-    "wps.com",
-    "wsdvs.com",
-    "wsj.com",
-    "wswebcdn.com",
-    "www.gov.br",
-    "www.gov.uk",
-    "wyzecam.com",
-    "x.com",
-    "xboxlive.com",
-    "xcal.tv",
-    "xerox.com",
-    "xhcdn.com",
-    "xiaomi.com",
-    "xiaomi.net",
-    "ya.ru",
-    "yahoo.co.jp",
-    "yahoo.com",
-    "yahoodns.net",
-    "yandex.com",
-    "yandex.com.tr",
-    "yandex.net",
-    "yandex.ru",
-    "yandexcloud.net",
-    "yccdn.ru",
-    "yellowblue.io",
-    "yelp.com",
-    "yieldmo.com",
-    "youku.com",
-    "youronlinechoices.com",
-    "youtu.be",
-    "youtube-nocookie.com",
-    "youtube.com",
-    "ys7.com",
-    "ytimg.com",
-    "yximgs.com",
-    "zdnscloud.cn",
-    "zendesk.com",
-    "zenecn.net",
-    "zhihu.com",
-    "zillow.com",
-    "zoho.com",
-    "zoom.com",
-    "zoom.us",
-})
+def _load_whitelist() -> set:
+    whitelist = set()
+
+    # Manual additions — known FP sites
+    WHITELIST_MANUAL = {
+        "dailyremote.com", "jobspresso.co", "remoteok.com",
+        "weworkremotely.com", "flexjobs.com", "remote.co",
+        "linkedin.com", "indeed.com", "glassdoor.com",
+        "wellfound.com", "monster.com", "ziprecruiter.com",
+        "neverssl.com", "httpforever.com", "roadmap.sh",
+        "scrimba.com", "dev.to", "hashnode.com",
+        "4kwallpapers.com", "freecodecamp.org",
+        "codecademy.com", "pluralsight.com", "egghead.io",
+        "frontendmasters.com", "udemy.com", "coursera.org",
+        "edx.org", "khanacademy.org", "brilliant.org",
+    }
+    whitelist.update(WHITELIST_MANUAL)
+
+    # Tranco list (if downloaded)
+    whitelist_path = os.path.join(MODELS_DIR, "whitelist.txt")
+    if os.path.exists(whitelist_path):
+        with open(whitelist_path) as f:
+            for line in f:
+                domain = line.strip().lower()
+                if domain:
+                    whitelist.add(domain)
+        print(f"[Whitelist] Loaded {len(whitelist):,} domains")
+    else:
+        print(f"[Whitelist] whitelist.txt not found — using manual list "
+              f"({len(whitelist)} domains)")
+
+    return whitelist
+
+WHITELIST = _load_whitelist()
 
 
 # ── URLClassifier (singleton) ─────────────────────────────────────────────────
@@ -1422,6 +550,11 @@ class URLClassifier:
         self._explainer: Optional[object] = None
         self._explainer_lock = threading.Lock()
 
+        if GSB_API_KEY:
+            print("[GSB] Google Safe Browsing API loaded")
+        else:
+            print("[GSB] WARNING: No API key found — GSB layer disabled")
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -1436,15 +569,37 @@ class URLClassifier:
             extract_heuristic_features(url), dtype=np.float32
         ).reshape(1, -1)
         heuristic_scaled = self.scaler.transform(heuristic).flatten()
-        processed  = preprocess_url_for_nlp(url)
-        char_dense = self.vec_char.transform([processed]).toarray().flatten()
-        word_dense = self.vec_word.transform([processed]).toarray().flatten()
+        # Use segment_url for NLP — matches training
+        segmented  = segment_url(url)
+        char_dense = self.vec_char.transform([segmented]).toarray().flatten()
+        word_dense = self.vec_word.transform([segmented]).toarray().flatten()
         return np.concatenate([heuristic_scaled, char_dense, word_dense])
 
     def _classify(self, url: str) -> dict:
         try:
             fv    = self._feature_vector(url)
             proba = float(self.model.predict_proba(fv.reshape(1, -1))[0][1])
+
+            raw_heuristic = extract_heuristic_features(url)
+            https_val     = raw_heuristic[_FEAT_IDX.get("https_flag", -1)]
+
+            # FIX 4: reduce confidence for clean HTTP-only sites
+            if https_val == 0.0 and proba < 0.80:
+                other_flags = [
+                    "brand_mismatch", "sus_words", "brand_in_domain",
+                    "risky_tld", "shortened", "ip_flag", "puny",
+                    "leet_in_domain", "brand_hyphen_suspicious",
+                    "susp_ext", "suspicious_port", "has_redirect",
+                    "double_slash_in_path", "abnormal_subdomain",
+                    "http_no_brand_no_age",
+                ]
+                other_scores = [
+                    raw_heuristic[_FEAT_IDX.get(f, -1)]
+                    for f in other_flags
+                ]
+                if all(s == 0.0 for s in other_scores):
+                    proba = proba * 0.55
+
             label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
             return {
                 "prediction": label,
@@ -1476,6 +631,7 @@ class URLClassifier:
         resolved_url = None
         unshortened  = None
 
+        # Layer 0: Whitelist
         if self._registered_domain(url) in WHITELIST:
             return {
                 "url": original_url, "prediction": "BENIGN",
@@ -1484,6 +640,18 @@ class URLClassifier:
                 "source": "whitelist",
             }
 
+        # Layer 1: Google Safe Browsing
+        is_malicious, threat_type = check_google_safe_browsing(url)
+        if is_malicious:
+            return {
+                "url": original_url, "prediction": "MALICIOUS",
+                "confidence": 100.0,
+                "threshold": round(self.threshold * 100, 2),
+                "source": "google_safe_browsing",
+                "threat_type": threat_type,
+            }
+
+        # Reverse DNS
         ip = _extract_ip(url)
         if ip:
             hostname = reverse_dns(ip)
@@ -1533,14 +701,26 @@ class URLClassifier:
 
     def explain_url(self, url: str, num_features: int = 30) -> dict:
         base = self.predict_url(url)
+
+        # Handle non-model sources
+        if base["source"] == "google_safe_browsing":
+            threat = base.get("threat_type", "malicious content")
+            return {
+                **base,
+                "explanation": [],
+                "reasons": [
+                    f"This URL was flagged by Google Safe Browsing as {threat}",
+                    "Google's database of known malicious URLs identified this site",
+                    "This site has been reported and verified as dangerous",
+                ]
+            }
+
         if base["source"] in ("whitelist", "invalid"):
             return {**base, "explanation": [], "reasons": []}
 
-        brand_name   = base.get("brand_detected")
-        real_domain  = base.get("real_domain")
-        classify_url = base.get("unshortened") or url
-
-        # Always extract raw heuristic features for backup reasons
+        brand_name    = base.get("brand_detected")
+        real_domain   = base.get("real_domain")
+        classify_url  = base.get("unshortened") or url
         raw_heuristic = extract_heuristic_features(classify_url)
 
         try:
@@ -1574,6 +754,12 @@ class URLClassifier:
                 })
 
                 if weight > 0:
+                    # FIX 2: skip https_flag reason if site actually has HTTPS
+                    if feat_name == "https_flag":
+                        raw_https = raw_heuristic[_FEAT_IDX.get("https_flag", -1)]
+                        if raw_https == 1.0:
+                            continue
+
                     nl = feature_to_natural_language(
                         feat_name, weight, feat_val,
                         brand_name, real_domain
@@ -1583,11 +769,9 @@ class URLClassifier:
                         reasons.append(nl)
 
             explanation.sort(key=lambda x: abs(x["weight"]), reverse=True)
-
-            # Keep top 3 from LIME
             top_reasons = reasons[:3]
 
-            # Fill remaining slots with rule-based backup reasons
+            # Fill with backup reasons if needed
             if len(top_reasons) < 3:
                 backup = _build_backup_reasons(
                     raw_heuristic, brand_name, real_domain,
@@ -1598,7 +782,6 @@ class URLClassifier:
             return {**base, "explanation": explanation, "reasons": top_reasons}
 
         except Exception as exc:
-            # On LIME failure — use pure rule-based reasons
             backup = _build_backup_reasons(
                 raw_heuristic, brand_name, real_domain, set(), 3
             )
@@ -1676,7 +859,6 @@ def _parse_lime_feature(condition_str: str) -> str:
         if condition_str.startswith(name):
             return name
     first = re.split(r"[\s<>=!]", condition_str)[0]
-    # If starts with digit or operator — unrecognised condition
     if first and (first[0].isdigit() or first[0] in "-+."):
         return ""
     return first
