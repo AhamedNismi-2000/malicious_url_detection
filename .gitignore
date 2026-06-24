@@ -1,254 +1,32 @@
-# ========================================
 # Python cache and bytecode
-# ========================================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.dmypy.json
-.pyre/
 
-# ========================================
-# Virtual environments
-# ========================================
+# Virtual environment
 venv/
-.venv/
-ENV/
 env/
-env.bak/
-venv.bak/
+.venv/
 
-# ========================================
-# IDE / Editor settings
-# ========================================
-# VS Code
+# VS Code settings
 .vscode/
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
 
-# PyCharm
-.idea/
-*.iws
+# Data directories
 
-# Spyder
-.spyproject
-.spyderproject
+processed/
+splits/
+tranco_top1000.txt
 
-# Sublime
-*.sublime-*
-
-# Vim / Emacs
-.*.swp
-.*.swo
-*~ 
-*un~ 
-.\#*
-*auto-save-list*
-
-# ========================================
-# Jupyter Notebook
-# ========================================
-.ipynb_checkpoints/
-notebooks/**/.ipynb_checkpoints
-notebooks/**/*-checkpoint.ipynb
-
-# ========================================
-# Data (do not commit large files)
-# ========================================
-data/raw/
-data/processed/
-data/splits/
-
-# ========================================
-# Feature outputs
-# ========================================
 features/
-!features/                     # keep the folder
-features/**/*.npz
-features/**/*.csv
-features/**/*.pkl
-features/**/*.joblib
-features/**/vectorizers/
-
-# ========================================
-# Models (do not commit large trained models)
-# ========================================
-models/
-!models/                        # keep folder structure
-models/**/*.pkl
-models/**/*.joblib
-models/**/*.h5
-models/**/*.pt
-models/**/*.pth
-
-# ========================================
-# Results / Reports / Plots
-# ========================================
-results/
-!results/                        # keep folder structure
-results/reports/**/*.csv
-results/reports/**/*.txt
-results/plots/**/*.png
-results/plots/**/*.jpg
-results/plots/**/*.pdf
-results/plots/**/*.svg
-results/logs/**/*.log
-results/validation/**/*.csv
-results/validation/**/*.txt
-results/validation/**/*.png
-!results/paper_figures/          # keep folder for curated figures
-results/paper_figures/*          # ignore auto-generated
-!results/paper_figures/final/    # keep final curated figures
-
-# ========================================
 # Logs
-# ========================================
 *.log
-logs/
-.log/
-logs.txt
 
-# ========================================
-# OS / System files
-# ========================================
-# macOS
+# OS files
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-.TemporaryItems
-.VolumeIcon.icns
-
-# Windows
 Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-*.cab
-*.msi
-*.msm
-*.msp
 
-# Linux
-*~ 
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# ========================================
-# Temporary / backup files
-# ========================================
-*.tmp
-*.temp
-*~
-*.swp
-*.swo
-*.bak
-*.backup
-temp/
-tmp/
-.tmp/
-.temp/
-
-# ========================================
-# Large datasets / archives
-# ========================================
-*.tar.gz
-*.zip
-*.7z
-*.rar
-*.dat
-*.data
-*.h5
-*.hdf5
-*.hdf
-*.mat
-
-# ========================================
-# LaTeX files (auto-generated)
-# ========================================
-research_paper/**/*.aux
-research_paper/**/*.log
-research_paper/**/*.out
-research_paper/**/*.toc
-research_paper/**/*.lof
-research_paper/**/*.lot
-research_paper/**/*.bbl
-research_paper/**/*.blg
-research_paper/**/*.fdb_latexmk
-research_paper/**/*.fls
-research_paper/**/*.synctex.gz
-research_paper/**/*.synctex(busy)
-research_paper/**/*.pdf
-!research_paper/draft/*.tex
-!research_paper/references.bib
-
-# ========================================
-# Python build / package
-# ========================================
-build/
-dist/
-*.egg-info/
-*.egg
-pip-wheel-metadata/
-share/python-wheels/
-
-# ========================================
-# Test / coverage
-# ========================================
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-test_reports/
-
-# ========================================
-# Documentation
-# ========================================
-docs/_build/
-docs/api/
-site/
-
-# ========================================
-# PyInstaller
-# ========================================
-*.spec
-
-# ========================================
-# IPython / pyenv
-# ========================================
-profile_default/
-ipython_config.py
-.python-version
-
-# ========================================
-# Celery
-# ========================================
-celerybeat-schedule
-celerybeat.pid
-
-# ========================================
-# Experiments / checkpoints / downloads
-# ========================================
-experiments/
-experiments/**/*
-checkpoints/
-checkpoints/**/*
-downloads/
-downloads/**/*
+models/
+metrics/
+error_analysis/
+.env

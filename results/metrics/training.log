@@ -1,0 +1,138 @@
+2026-06-24 12:08:51,231 - INFO - RANDOM FOREST TRAINING  (Fixed Version)
+2026-06-24 12:08:51,231 - INFO - ============================================================
+2026-06-24 12:08:51,232 - INFO - 
+Loading feature files...
+2026-06-24 12:08:51,232 - INFO -    Loading features_train.npz...
+2026-06-24 12:08:51,480 - INFO -    Shape: (184678, 558)  |  Benign: 92,339  Malicious: 92,339
+2026-06-24 12:08:51,481 - INFO -    Loading features_val.npz...
+2026-06-24 12:08:51,545 - INFO -    Shape: (39575, 558)  |  Benign: 19,787  Malicious: 19,788
+2026-06-24 12:08:51,546 - INFO -    Loading features_test.npz...
+2026-06-24 12:08:51,609 - INFO -    Shape: (39575, 558)  |  Benign: 19,788  Malicious: 19,787
+2026-06-24 12:08:51,609 - INFO - 
+Dataset summary:
+2026-06-24 12:08:51,610 - INFO -    Train   : 184,678 x 558 features
+2026-06-24 12:08:51,610 - INFO -    Val     : 39,575 x 558 features
+2026-06-24 12:08:51,610 - INFO -    Test    : 39,575 x 558 features
+2026-06-24 12:08:51,610 - INFO - 
+Converting sparse features to dense...
+2026-06-24 12:08:51,610 - INFO -    Converting train to dense (estimated 412 MB)...
+2026-06-24 12:08:51,873 - INFO -    Converting val to dense (estimated 88 MB)...
+2026-06-24 12:08:51,968 - INFO -    Converting test to dense (estimated 88 MB)...
+2026-06-24 12:08:52,065 - INFO - 
+Training Random Forest...
+2026-06-24 12:08:52,066 - INFO -    Samples      : 184,678
+2026-06-24 12:08:52,066 - INFO -    Features     : 558
+2026-06-24 12:08:52,066 - INFO -    Trees        : 300
+2026-06-24 12:08:52,066 - INFO -    Max depth    : 25
+2026-06-24 12:08:52,066 - INFO -    Class weight : None
+2026-06-24 12:10:50,919 - INFO -    Training time : 2.0 minutes
+2026-06-24 12:10:50,919 - INFO -    OOB score     : 0.9517
+2026-06-24 12:10:51,087 - INFO - 
+   Top 20 most important features:
+2026-06-24 12:10:51,088 - INFO -     Rank                             Feature   Importance
+2026-06-24 12:10:51,088 - INFO -        1                          https_flag       0.0410
+2026-06-24 12:10:51,088 - INFO -        2                     subdomain_parts       0.0365
+2026-06-24 12:10:51,088 - INFO -        3                      max_consonants       0.0356
+2026-06-24 12:10:51,088 - INFO -        4                            path_len       0.0326
+2026-06-24 12:10:51,089 - INFO -        5                             url_len       0.0291
+2026-06-24 12:10:51,089 - INFO -        6                         num_slashes       0.0253
+2026-06-24 12:10:51,089 - INFO -        7                            num_dots       0.0247
+2026-06-24 12:10:51,089 - INFO -        8                         url_entropy       0.0240
+2026-06-24 12:10:51,089 - INFO -        9                          path_depth       0.0234
+2026-06-24 12:10:51,089 - INFO -       10                          num_digits       0.0193
+2026-06-24 12:10:51,090 - INFO -       11                             tld_len       0.0189
+2026-06-24 12:10:51,090 - INFO -       12                             word_45       0.0176
+2026-06-24 12:10:51,090 - INFO -       13                            char_229       0.0175
+2026-06-24 12:10:51,090 - INFO -       14                            char_100       0.0151
+2026-06-24 12:10:51,090 - INFO -       15                         num_letters       0.0151
+2026-06-24 12:10:51,090 - INFO -       16                http_no_brand_no_age       0.0148
+2026-06-24 12:10:51,091 - INFO -       17                              char_9       0.0139
+2026-06-24 12:10:51,091 - INFO -       18                            char_217       0.0136
+2026-06-24 12:10:51,091 - INFO -       19                          max_digits       0.0136
+2026-06-24 12:10:51,091 - INFO -       20                             char_99       0.0133
+2026-06-24 12:10:51,091 - INFO - 
+   292 features cover 95% of decisions (out of 558)
+2026-06-24 12:10:51,092 - INFO - 
+Tuning threshold on VAL set (FPR constrained)...
+2026-06-24 12:10:51,092 - INFO -    FPR constraint : < 0.05
+2026-06-24 12:10:52,842 - INFO -    Best threshold : 0.44
+2026-06-24 12:10:52,842 - INFO -    Best F1 (val)  : 0.9520
+2026-06-24 12:10:52,842 - INFO - 
+    Threshold       F1   Recall  Precision      FPR    OK?
+2026-06-24 12:10:52,842 - INFO -          0.38   0.9500   0.9558     0.9442   0.0565  ✗ FPR
+2026-06-24 12:10:52,842 - INFO -          0.39   0.9507   0.9541     0.9473   0.0531  ✗ FPR
+2026-06-24 12:10:52,843 - INFO -          0.40   0.9514   0.9519     0.9509   0.0492      ✓
+2026-06-24 12:10:52,843 - INFO -          0.41   0.9515   0.9493     0.9537   0.0461      ✓
+2026-06-24 12:10:52,843 - INFO -          0.42   0.9517   0.9469     0.9566   0.0430      ✓
+2026-06-24 12:10:52,843 - INFO -          0.43   0.9518   0.9449     0.9588   0.0406      ✓
+2026-06-24 12:10:52,843 - INFO -          0.44   0.9520   0.9430     0.9611   0.0382      ✓ <-- best
+2026-06-24 12:10:52,844 - INFO -          0.45   0.9519   0.9412     0.9627   0.0364      ✓
+2026-06-24 12:10:52,844 - INFO -          0.46   0.9516   0.9387     0.9649   0.0342      ✓
+2026-06-24 12:10:52,844 - INFO -          0.47   0.9513   0.9363     0.9669   0.0321      ✓
+2026-06-24 12:10:52,844 - INFO -          0.48   0.9513   0.9340     0.9693   0.0296      ✓
+2026-06-24 12:10:52,844 - INFO -          0.49   0.9514   0.9320     0.9717   0.0272      ✓
+2026-06-24 12:10:52,844 - INFO -          0.50   0.9510   0.9297     0.9734   0.0254      ✓
+2026-06-24 12:10:52,844 - INFO -          0.51   0.9505   0.9273     0.9748   0.0240      ✓
+2026-06-24 12:10:52,845 - INFO - 
+Evaluating on VAL (39,575 samples)...
+2026-06-24 12:10:53,650 - INFO - 
+   VAL RESULTS (threshold=0.44)
+2026-06-24 12:10:53,651 - INFO -    =============================================
+2026-06-24 12:10:53,651 - INFO -    Accuracy  : 0.9524
+2026-06-24 12:10:53,651 - INFO -    Precision : 0.9611
+2026-06-24 12:10:53,651 - INFO -    Recall    : 0.9430
+2026-06-24 12:10:53,651 - INFO -    F1        : 0.9520
+2026-06-24 12:10:53,651 - INFO -    AUC-ROC   : 0.9884
+2026-06-24 12:10:53,651 - INFO - 
+   Confusion Matrix:
+2026-06-24 12:10:53,651 - INFO -    TN=19,032  FP=755
+2026-06-24 12:10:53,652 - INFO -    FN=1,127  TP=18,661
+2026-06-24 12:10:53,652 - INFO - 
+   FPR : 0.0382  (755 legit URLs wrongly flagged)
+2026-06-24 12:10:53,652 - INFO -    FNR : 0.0570  (1,127 malicious URLs missed)
+2026-06-24 12:10:53,652 - INFO -    FPR within acceptable range (< 0.05) ✓
+2026-06-24 12:10:53,711 - INFO - 
+Evaluating on TEST (39,575 samples)...
+2026-06-24 12:10:54,503 - INFO - 
+   TEST RESULTS (threshold=0.44)
+2026-06-24 12:10:54,504 - INFO -    =============================================
+2026-06-24 12:10:54,504 - INFO -    Accuracy  : 0.9545
+2026-06-24 12:10:54,504 - INFO -    Precision : 0.9614
+2026-06-24 12:10:54,504 - INFO -    Recall    : 0.9471
+2026-06-24 12:10:54,504 - INFO -    F1        : 0.9542
+2026-06-24 12:10:54,505 - INFO -    AUC-ROC   : 0.9888
+2026-06-24 12:10:54,505 - INFO - 
+   Confusion Matrix:
+2026-06-24 12:10:54,505 - INFO -    TN=19,036  FP=752
+2026-06-24 12:10:54,505 - INFO -    FN=1,047  TP=18,740
+2026-06-24 12:10:54,505 - INFO - 
+   FPR : 0.0380  (752 legit URLs wrongly flagged)
+2026-06-24 12:10:54,506 - INFO -    FNR : 0.0529  (1,047 malicious URLs missed)
+2026-06-24 12:10:54,506 - INFO -    FPR within acceptable range (< 0.05) ✓
+2026-06-24 12:10:54,561 - INFO - 
+Saving model and metrics...
+2026-06-24 12:10:56,293 - INFO - 
+   Model saved : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260624_121054.joblib
+2026-06-24 12:10:56,294 - INFO -    Model size  : 46.5 MB
+2026-06-24 12:10:57,976 - INFO -    Metrics     : d:\Research Project\Research_Working _dir_2\malicious_url_detection\results\metrics\rf_metrics_20260624_121054.json
+2026-06-24 12:10:57,977 - INFO - 
+============================================================
+2026-06-24 12:10:57,977 - INFO - TRAINING COMPLETE
+2026-06-24 12:10:57,977 - INFO - ============================================================
+2026-06-24 12:10:57,977 - INFO -    OOB Score  : 0.9517
+2026-06-24 12:10:57,977 - INFO -    Threshold  : 0.44
+2026-06-24 12:10:57,978 - INFO - 
+   VAL  F1    : 0.9520
+2026-06-24 12:10:57,978 - INFO -    VAL  AUC   : 0.9884
+2026-06-24 12:10:57,978 - INFO -    VAL  FPR   : 0.0382
+2026-06-24 12:10:57,978 - INFO -    VAL  FNR   : 0.0570
+2026-06-24 12:10:57,978 - INFO - 
+   TEST F1    : 0.9542
+2026-06-24 12:10:57,978 - INFO -    TEST AUC   : 0.9888
+2026-06-24 12:10:57,979 - INFO -    TEST FPR   : 0.0380
+2026-06-24 12:10:57,979 - INFO -    TEST FNR   : 0.0529
+2026-06-24 12:10:57,979 - INFO - 
+   Val/Test F1 gap = 0.0022 ✓ healthy
+2026-06-24 12:10:57,979 - INFO - 
+   Model  : d:\Research Project\Research_Working _dir_2\malicious_url_detection\models\rf_model_20260624_121054.joblib
+2026-06-24 12:10:57,979 - INFO -    Next   : run evaluate.py or predict.py
