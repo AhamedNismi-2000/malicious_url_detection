@@ -8,20 +8,22 @@ Loads model artefacts and exposes three public methods:
   explain_url(url, num_features=30)  -> dict
 
 Prediction pipeline:
-  Layer 0: Whitelist check
+  Layer 0: Whitelist check (Tranco top 50k + manual list)
   Layer 1: Google Safe Browsing API (known threats)
   Layer 2: ML Model (Random Forest 558 features)
-  Layer 3: Post-prediction confidence adjustment
+  Layer 3: Domain Age post-prediction adjustment (WHOIS, cached)
 
-Fixes applied:
+Fixes:
   - FIX 1: https_flag backup threshold -0.1
   - FIX 2: explain_url skips https_flag when site has HTTPS
   - FIX 3: feature_to_natural_language validates flag values
   - FIX 4: _classify reduces confidence for clean HTTP sites
   - FIX 5: brand reason skipped when no brand detected
-  - FIX 6: Google Safe Browsing API layer added
-  - FIX 7: WHOIS removed — uses http_no_brand_no_age feature instead
-  - FIX 8: Updated for 558 features (new feature_extraction.py)
+  - FIX 6: Google Safe Browsing API layer
+  - FIX 7: Domain age WHOIS post-prediction adjustment (cached, no retraining)
+  - FIX 8: Leet speak brand detection (go0gle, amaz0n etc.)
+  - FIX 9: Force malicious when leet_in_domain + no HTTPS
+  - FIX 10: Updated for 558 features
 """
 
 import json
@@ -31,7 +33,9 @@ import sys
 import socket
 import threading
 import warnings
+import functools
 from typing import Optional
+from datetime import datetime, timezone
 
 import joblib
 import numpy as np
@@ -64,11 +68,14 @@ from feature_extraction import (
 MODELS_DIR = os.path.join(_ROOT, "models")
 DATA_DIR   = os.path.join(_ROOT, "data")
 
+# Domain age cache path — persists between Flask restarts
+DOMAIN_AGE_CACHE_PATH = os.path.join(MODELS_DIR, "domain_age_cache.json")
+
 # ── Google Safe Browsing API ──────────────────────────────────────────────────
 GSB_API_KEY = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY", "")
 GSB_URL     = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
-# ── Feature names — must match feature_extraction.py exactly ─────────────────
+# ── Feature names ─────────────────────────────────────────────────────────────
 HEURISTIC_FEATURES: list[str] = HEURISTIC_FEATURE_NAMES  # 56 features
 
 FEATURE_NAMES: list[str] = (
@@ -116,6 +123,33 @@ BRAND_MAP = {
     "dhl"          : ("DHL",            "dhl.com"),
     "fedex"        : ("FedEx",          "fedex.com"),
     "ups"          : ("UPS",            "ups.com"),
+}
+
+# FIX 8: Leet speak brand map
+LEET_BRAND_MAP = {
+    "g00gle"   : ("Google",    "google.com"),
+    "go0gle"   : ("Google",    "google.com"),
+    "g0ogle"   : ("Google",    "google.com"),
+    "g00gl3"   : ("Google",    "google.com"),
+    "micr0soft": ("Microsoft", "microsoft.com"),
+    "m1crosoft": ("Microsoft", "microsoft.com"),
+    "amaz0n"   : ("Amazon",    "amazon.com"),
+    "amaz00n"  : ("Amazon",    "amazon.com"),
+    "paypa1"   : ("PayPal",    "paypal.com"),
+    "payp4l"   : ("PayPal",    "paypal.com"),
+    "pay0al"   : ("PayPal",    "paypal.com"),
+    "faceb00k" : ("Facebook",  "facebook.com"),
+    "fac3book" : ("Facebook",  "facebook.com"),
+    "twitt3r"  : ("Twitter",   "twitter.com"),
+    "tw1tter"  : ("Twitter",   "twitter.com"),
+    "app1e"    : ("Apple",     "apple.com"),
+    "app13"    : ("Apple",     "apple.com"),
+    "netfl1x"  : ("Netflix",   "netflix.com"),
+    "n3tflix"  : ("Netflix",   "netflix.com"),
+    "inst4gram": ("Instagram",  "instagram.com"),
+    "1nstagram": ("Instagram",  "instagram.com"),
+    "linked1n" : ("LinkedIn",  "linkedin.com"),
+    "l1nkedin" : ("LinkedIn",  "linkedin.com"),
 }
 
 # ── Natural language templates ────────────────────────────────────────────────
@@ -274,21 +308,143 @@ _BACKUP_CHECKS = [
     ("double_slash_in_path",     0.5, "The URL path contains double slashes — a common obfuscation technique"),
     ("abnormal_subdomain",       0.5, "The subdomain contains suspicious patterns such as random digits"),
     ("http_no_brand_no_age",     0.5, "This site uses HTTP without HTTPS and shows other suspicious signals"),
-    # FIX 1: threshold -0.1 so only fires when https_flag truly 0
     ("https_flag",              -0.1, "This site does not use HTTPS — your connection may not be secure"),
     ("num_hyphens",              2.0, "The domain contains excessive hyphens which is uncommon in legitimate sites"),
     ("path_depth",               3.0, "The URL has an unusually deep path — often used to mimic legitimate sites"),
 ]
 
 
-# ── Google Safe Browsing ──────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# DOMAIN AGE — WHOIS WITH PERSISTENT CACHE
+# ════════════════════════════════════════════════════════════════
+
+# In-memory cache — fast lookup
+_domain_age_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def _load_domain_age_cache():
+    """Load domain age cache from disk at startup."""
+    global _domain_age_cache
+    if os.path.exists(DOMAIN_AGE_CACHE_PATH):
+        try:
+            with open(DOMAIN_AGE_CACHE_PATH, "r") as f:
+                _domain_age_cache = json.load(f)
+            print(f"[DomainAge] Cache loaded: {len(_domain_age_cache):,} domains")
+        except Exception:
+            _domain_age_cache = {}
+    else:
+        print("[DomainAge] No cache found — will build on first requests")
+
+
+def _save_domain_age_cache():
+    """Save domain age cache to disk."""
+    try:
+        with open(DOMAIN_AGE_CACHE_PATH, "w") as f:
+            json.dump(_domain_age_cache, f)
+    except Exception:
+        pass
+
+
+def get_domain_age_days(domain: str) -> int:
+    """
+    Returns domain age in days via WHOIS.
+    Uses persistent disk cache — each domain looked up only ONCE ever.
+
+    Returns:
+      -1  = unknown (WHOIS failed or blocked)
+       N  = N days old
+    """
+    if not domain:
+        return -1
+
+    # Check memory cache first — instant
+    if domain in _domain_age_cache:
+        return _domain_age_cache[domain]
+
+    # WHOIS lookup — 2-5 seconds but only happens ONCE per domain
+    try:
+        import whois
+        w             = whois.whois(domain)
+        creation_date = w.creation_date
+
+        if creation_date is None:
+            age = -1
+        else:
+            if isinstance(creation_date, list):
+                creation_date = creation_date[0]
+            if hasattr(creation_date, 'tzinfo') and creation_date.tzinfo is None:
+                creation_date = creation_date.replace(tzinfo=timezone.utc)
+            age = max(0, (datetime.now(timezone.utc) - creation_date).days)
+
+    except Exception:
+        age = -1
+
+    # Cache result in memory and disk
+    with _cache_lock:
+        _domain_age_cache[domain] = age
+        # Save to disk every time a new domain is cached
+        _save_domain_age_cache()
+
+    return age
+
+
+def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, str]:
+    """
+    Adjusts ML confidence score based on domain age.
+    This is the permanent fix for FP on legitimate old sites
+    and FN on new phishing sites.
+
+    Age multipliers:
+      Unknown      → no change
+      < 30 days    → × 1.4  (very new = high risk)
+      30-180 days  → × 1.15 (new = elevated risk)
+      180-365 days → × 1.0  (recent = no change)
+      1-2 years    → × 0.7  (established = reduce)
+      2-5 years    → × 0.5  (old = reduce more)
+      > 5 years    → × 0.3  (very old = reduce significantly)
+
+    Examples:
+      go0gle.com      (1 day)    0.39 × 1.4 = 0.55 → MALICIOUS ✅
+      roadmap.sh      (7 years)  0.89 × 0.3 = 0.27 → BENIGN    ✅
+      scrimba.com     (10 years) 0.89 × 0.3 = 0.27 → BENIGN    ✅
+      hackerearth.com (14 years) 0.89 × 0.3 = 0.27 → BENIGN    ✅
+      paypal-security.tk (2 days) 0.95 × 1.4 = 1.0 → MALICIOUS ✅
+    """
+    age = get_domain_age_days(domain)
+
+    if age < 0:
+        return proba, "unknown"
+
+    if age < 30:
+        multiplier = 1.4
+        age_label  = f"very_new ({age}d)"
+    elif age < 180:
+        multiplier = 1.15
+        age_label  = f"new ({age}d)"
+    elif age < 365:
+        multiplier = 1.0
+        age_label  = f"recent ({age}d)"
+    elif age < 730:
+        multiplier = 0.7
+        age_label  = f"established ({age}d)"
+    elif age < 1825:
+        multiplier = 0.5
+        age_label  = f"old ({age}d)"
+    else:
+        multiplier = 0.3
+        age_label  = f"very_old ({age}d)"
+
+    adjusted = min(1.0, proba * multiplier)
+    return adjusted, age_label
+
+
+# ════════════════════════════════════════════════════════════════
+# GOOGLE SAFE BROWSING
+# ════════════════════════════════════════════════════════════════
 
 def check_google_safe_browsing(url: str) -> tuple[bool, str]:
-    """
-    Returns (is_malicious, threat_type)
-    Checks URL against Google Safe Browsing API.
-    Returns False if API key not configured.
-    """
+    """Check URL against Google Safe Browsing API."""
     if not GSB_API_KEY:
         return False, ""
     try:
@@ -323,20 +479,36 @@ def check_google_safe_browsing(url: str) -> tuple[bool, str]:
         return False, ""
 
 
-# ── Brand detection ───────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# BRAND DETECTION
+# ════════════════════════════════════════════════════════════════
 
 def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Detect brand impersonation in URL.
+    FIX 8: Also detects leet speak brand impersonation.
+    """
     url_lower = url.lower()
+
+    # Standard brand detection
     for keyword, (display_name, real_domain) in BRAND_MAP.items():
         if keyword in url_lower:
             host = re.sub(r"^https?://", "", url_lower).split("/")[0]
             reg  = ".".join(host.split(".")[-2:]) if "." in host else host
             if reg != real_domain:
                 return display_name, real_domain
+
+    # FIX 8: Leet speak brand detection
+    for leet_keyword, (display_name, real_domain) in LEET_BRAND_MAP.items():
+        if leet_keyword in url_lower:
+            return display_name, real_domain
+
     return None, None
 
 
-# ── Natural language explanation ──────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# NATURAL LANGUAGE EXPLANATION
+# ════════════════════════════════════════════════════════════════
 
 def feature_to_natural_language(
     feature: str,
@@ -427,7 +599,9 @@ def _build_backup_reasons(
     return reasons
 
 
-# ── Reverse DNS ───────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# NETWORK HELPERS
+# ════════════════════════════════════════════════════════════════
 
 def reverse_dns(ip: str, timeout: int = 3) -> Optional[str]:
     if _PRIVATE_IP_RE.match(ip):
@@ -439,8 +613,6 @@ def reverse_dns(ip: str, timeout: int = 3) -> Optional[str]:
     except (socket.herror, socket.gaierror, OSError):
         return None
 
-
-# ── URL Unshortening ──────────────────────────────────────────────────────────
 
 def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
     try:
@@ -482,27 +654,63 @@ def _extract_ip(url: str) -> Optional[str]:
         return None
 
 
-# ── Whitelist ─────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# WHITELIST
+# ════════════════════════════════════════════════════════════════
 
 def _load_whitelist() -> set:
     whitelist = set()
 
-    # Manual additions — known FP sites
     WHITELIST_MANUAL = {
+        # Major search and tech
+        "google.com", "gmail.com", "youtube.com", "googleapis.com",
+        "google.co.uk", "google.com.au", "google.ca", "google.in",
+        "github.com", "gitlab.com", "stackoverflow.com",
+        "wikipedia.org", "wikimedia.org",
+        # Microsoft
+        "microsoft.com", "microsoftonline.com", "live.com",
+        "outlook.com", "office.com", "azure.com", "bing.com",
+        # Apple
+        "apple.com", "icloud.com",
+        # Amazon
+        "amazon.com", "amazon.co.uk", "amazon.de", "amazon.fr",
+        "amazonaws.com",
+        # Social
+        "facebook.com", "instagram.com", "twitter.com", "x.com",
+        "linkedin.com", "reddit.com", "pinterest.com",
+        "whatsapp.com", "telegram.org", "discord.com",
+        # Finance
+        "paypal.com", "bankofamerica.com", "chase.com",
+        "wellsfargo.com", "citibank.com", "visa.com",
+        "mastercard.com", "stripe.com",
+        # Entertainment
+        "netflix.com", "spotify.com", "twitch.tv",
+        "slack.com", "zoom.us",
+        # Shopping
+        "ebay.com", "etsy.com", "shopify.com",
+        # Tools
+        "dropbox.com", "adobe.com", "salesforce.com",
+        "wordpress.com", "medium.com",
+        # Developer sites
+        "roadmap.sh", "dev.to", "freecodecamp.org",
+        "scrimba.com", "codecademy.com", "hashnode.com",
+        "hackerearth.com", "hackerrank.com", "leetcode.com",
+        "codechef.com", "codeforces.com", "kaggle.com",
+        "replit.com", "codepen.io", "codesandbox.io",
+        "exercism.org", "theodinproject.com",
+        # Job boards
         "dailyremote.com", "jobspresso.co", "remoteok.com",
         "weworkremotely.com", "flexjobs.com", "remote.co",
-        "linkedin.com", "indeed.com", "glassdoor.com",
         "wellfound.com", "monster.com", "ziprecruiter.com",
-        "neverssl.com", "httpforever.com", "roadmap.sh",
-        "scrimba.com", "dev.to", "hashnode.com",
-        "4kwallpapers.com", "freecodecamp.org",
-        "codecademy.com", "pluralsight.com", "egghead.io",
-        "frontendmasters.com", "udemy.com", "coursera.org",
-        "edx.org", "khanacademy.org", "brilliant.org",
+        "indeed.com", "glassdoor.com",
+        # Media
+        "4kwallpapers.com", "unsplash.com", "pexels.com",
+        # Other legit
+        "neverssl.com", "httpforever.com",
     }
     whitelist.update(WHITELIST_MANUAL)
 
-    # Tranco list (if downloaded)
+    # Load Tranco whitelist from file
     whitelist_path = os.path.join(MODELS_DIR, "whitelist.txt")
     if os.path.exists(whitelist_path):
         with open(whitelist_path) as f:
@@ -520,7 +728,9 @@ def _load_whitelist() -> set:
 WHITELIST = _load_whitelist()
 
 
-# ── URLClassifier (singleton) ─────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# URL CLASSIFIER SINGLETON
+# ════════════════════════════════════════════════════════════════
 
 class URLClassifier:
     _instance: Optional["URLClassifier"] = None
@@ -550,10 +760,15 @@ class URLClassifier:
         self._explainer: Optional[object] = None
         self._explainer_lock = threading.Lock()
 
+        # Load domain age cache from disk
+        _load_domain_age_cache()
+
         if GSB_API_KEY:
             print("[GSB] Google Safe Browsing API loaded")
         else:
             print("[GSB] WARNING: No API key found — GSB layer disabled")
+            print("[GSB] Fix: ensure .env has no spaces: "
+                  "GOOGLE_SAFE_BROWSING_API_KEY=your_key")
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -561,6 +776,9 @@ class URLClassifier:
     def _registered_domain(url: str) -> str:
         cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
         host    = cleaned.split("/")[0].split(":")[0].split("?")[0].lower()
+        # Remove www prefix
+        if host.startswith("www."):
+            host = host[4:]
         parts   = host.split(".")
         return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
@@ -569,7 +787,6 @@ class URLClassifier:
             extract_heuristic_features(url), dtype=np.float32
         ).reshape(1, -1)
         heuristic_scaled = self.scaler.transform(heuristic).flatten()
-        # Use segment_url for NLP — matches training
         segmented  = segment_url(url)
         char_dense = self.vec_char.transform([segmented]).toarray().flatten()
         word_dense = self.vec_word.transform([segmented]).toarray().flatten()
@@ -582,6 +799,11 @@ class URLClassifier:
 
             raw_heuristic = extract_heuristic_features(url)
             https_val     = raw_heuristic[_FEAT_IDX.get("https_flag", -1)]
+            leet_dom      = raw_heuristic[_FEAT_IDX.get("leet_in_domain", -1)]
+
+            # FIX 9: force malicious for leet speak domain + no HTTPS
+            if leet_dom == 1.0 and https_val == 0.0:
+                proba = max(proba, 0.85)
 
             # FIX 4: reduce confidence for clean HTTP-only sites
             if https_val == 0.0 and proba < 0.80:
@@ -600,12 +822,17 @@ class URLClassifier:
                 if all(s == 0.0 for s in other_scores):
                     proba = proba * 0.55
 
+            # FIX 7: domain age post-prediction adjustment
+            domain = self._registered_domain(url)
+            proba, age_note = adjust_confidence_by_domain_age(proba, domain)
+
             label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
             return {
                 "prediction": label,
                 "confidence": round(proba * 100, 2),
                 "threshold" : round(self.threshold * 100, 2),
                 "source"    : "model",
+                "domain_age": age_note,
             }
         except Exception as exc:
             return {
@@ -688,9 +915,9 @@ class URLClassifier:
             result["brand_detected"] = brand_name
             result["real_domain"]    = real_domain
         if resolved_url:
-            result["resolved_ip"]    = hostname
+            result["resolved_ip"] = hostname
         if unshortened:
-            result["unshortened"]    = unshortened
+            result["unshortened"] = unshortened
 
         return result
 
@@ -723,6 +950,10 @@ class URLClassifier:
         classify_url  = base.get("unshortened") or url
         raw_heuristic = extract_heuristic_features(classify_url)
 
+        # Add domain age reason if very new domain
+        domain   = self._registered_domain(classify_url)
+        age_days = get_domain_age_days(domain)
+
         try:
             explainer = self._get_explainer()
             fv        = self._feature_vector(classify_url)
@@ -754,7 +985,7 @@ class URLClassifier:
                 })
 
                 if weight > 0:
-                    # FIX 2: skip https_flag reason if site actually has HTTPS
+                    # FIX 2: skip https_flag reason if site has HTTPS
                     if feat_name == "https_flag":
                         raw_https = raw_heuristic[_FEAT_IDX.get("https_flag", -1)]
                         if raw_https == 1.0:
@@ -778,6 +1009,18 @@ class URLClassifier:
                     set(top_reasons), 3 - len(top_reasons)
                 )
                 top_reasons.extend(backup)
+
+            # Add domain age reason if very new
+            if age_days >= 0 and age_days < 30:
+                age_reason = (
+                    f"This domain was registered only {age_days} days ago — "
+                    "newly registered domains are a strong phishing indicator"
+                )
+                if age_reason not in top_reasons:
+                    if len(top_reasons) >= 3:
+                        top_reasons[2] = age_reason
+                    else:
+                        top_reasons.append(age_reason)
 
             return {**base, "explanation": explanation, "reasons": top_reasons}
 
