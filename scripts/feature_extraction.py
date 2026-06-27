@@ -3,29 +3,43 @@
 feature_extraction.py  —  Final Fixed Malicious URL Feature Extraction
 -----------------------------------------------------------------------
 
-FIXES:
-  1. NO WHOIS  — removed entirely for fast runtime (~40-60 min for 300k URLs)
-  2. HTTPS BIAS fixed via context-aware feature using:
-       - Tranco top 1M whitelist (load from local file if available)
-       - Built-in expanded REAL_BRAND_DOMAINS as fallback
-       - TLD + suspicious word proxy when domain not in whitelist
-  3. Lexical segmentation before TF-IDF
-  4. New features: has_redirect, double_slash_in_path, abnormal_subdomain
-  5. No domain_age features at all (WHOIS removed)
+CHANGES FROM PREVIOUS VERSION:
+  1. TRANCO_PATH fix — removed trailing space in "raw " directory name
+  2. leet_in_domain_only() rewritten — now catches:
+       - Single substitution anywhere (paypa1, amaz0n)
+       - Multi-substitution (g00gle, p4yp4l)
+       - End-of-word leet (paypa1, netfl1x)
+       - Leet at start of word (1nstagram)
+  3. detect_leet_speak() rewritten — density-based scoring
+       - Counts ALL substitutions, not just [a-z]digit[a-z] pattern
+       - Normalises by domain length for a true density score
+  4. NEW feature: leet_brand_score
+       - Decodes leet substitutions back to plain text
+       - Checks if decoded text contains a known brand name
+       - Score = 1.0 if leet + brand match, 0.0 otherwise
+       - This is the key signal missing from the old model
 
-Feature breakdown (total: 558):
+Feature breakdown (total: 559):
   Structural heuristics   : 39
   Obfuscation             :  6
   Rule-based              :  3
   Domain-level            :  4
   NEW structural          :  3  (has_redirect, double_slash_in_path, abnormal_subdomain)
-  HTTPS context fix       :  1  (http_no_brand_no_age — no WHOIS needed)
+  HTTPS context fix       :  1  (http_no_brand_no_age)
+  NEW leet brand score    :  1  (leet_brand_score)  ← NEW
   ─────────────────────────
-  Heuristic subtotal      : 56
+  Heuristic subtotal      : 57  (was 56)
   Char n-gram TF-IDF      : 300
   Word n-gram TF-IDF      : 202
   ─────────────────────────
-  TOTAL                   : 558
+  TOTAL                   : 559 (was 558)
+
+NOTE: Because we added 1 heuristic feature, you must retrain the model.
+      The saved vectorizer/scaler/model from the old 558-feature run will
+      not be compatible. Run the full pipeline again:
+        python scripts/feature_extraction.py
+        python scripts/train_model.py
+        python scripts/evaluate_model.py
 
 Runtime estimate (300k URLs, no WHOIS):
   Heuristic extraction    : ~15-25 min
@@ -36,10 +50,6 @@ Runtime estimate (300k URLs, no WHOIS):
 Split-aware (no leakage):
   Vectorizers fitted on TRAIN only
   Scaler fitted on TRAIN only
-
-HOW TO USE TRANCO WHITELIST:
-  Download from https://tranco-list.eu → save as data/tranco_top1m.csv
-  If file exists, it loads automatically. Otherwise falls back to built-in list.
 """
 
 import os
@@ -71,7 +81,9 @@ BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPLITS_DIR   = os.path.join(BASE_DIR, "data", "splits")
 FEATURES_DIR = os.path.join(BASE_DIR, "features")
 MODELS_DIR   = os.path.join(BASE_DIR, "models")
-TRANCO_PATH  = os.path.join(BASE_DIR, "data", "raw ", "top-1m.csv")
+
+# FIX 1: removed trailing space from "raw " — was causing silent FileNotFoundError
+TRANCO_PATH  = os.path.join(BASE_DIR, "data", "raw", "top-1m.csv")
 
 os.makedirs(FEATURES_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,   exist_ok=True)
@@ -144,8 +156,6 @@ RISKY_TLDS = {
     "cyou","rest","bar","buzz","live","xxx","dating"
 }
 
-# Safe TLDs — domains on these are very unlikely to be malicious
-# Used in http proxy fix as a legitimacy signal
 SAFE_TLDS = {
     "edu", "gov", "mil", "ac", "int",
     "org", "net", "com", "co", "io",
@@ -161,7 +171,6 @@ BRANDS = {
     "citi","bank","pay","secure"
 }
 
-# Expanded built-in whitelist — used when Tranco file not available
 REAL_BRAND_DOMAINS = {
     # Payment
     "paypal.com","visa.com","mastercard.com","stripe.com",
@@ -210,20 +219,54 @@ _ABNORMAL_SUB_RE = re.compile(
 
 EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=None)
 
+# ─────────────────────── LEET SPEAK CONSTANTS ────────────────
+# FIX 2 & 3: Complete leet substitution map
+# Maps leet digit/symbol → possible plain letters it replaces
+LEET_TO_ALPHA = {
+    "0": "o",
+    "1": "i",   # also l
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "6": "g",   # less common
+    "7": "t",
+    "8": "b",   # less common
+    "9": "g",
+    "@": "a",
+    "$": "s",
+    "!": "i",
+}
+
+# Reverse: for decoding leet back to brand names
+# Maps each digit to ALL letters it could represent
+LEET_DECODE_MAP = {
+    "0": ["o"],
+    "1": ["i", "l"],
+    "3": ["e"],
+    "4": ["a"],
+    "5": ["s"],
+    "6": ["g", "b"],
+    "7": ["t"],
+    "8": ["b"],
+    "9": ["g"],
+    "@": ["a"],
+    "$": ["s"],
+    "!": ["i"],
+}
+
+# Pre-compile pattern: any leet character in domain context
+# Catches digits/symbols that substitute letters
+_LEET_CHARS = set(LEET_TO_ALPHA.keys())
+
+
 # ─────────────────────── TRANCO WHITELIST ────────────────────
-# Global set — populated once at startup
 _TRANCO_WHITELIST: set = set()
 
 def load_tranco_whitelist():
     """
     Load Tranco top 1M whitelist from local CSV file.
     File format: rank,domain  (standard Tranco format)
-    If file not found, falls back to built-in REAL_BRAND_DOMAINS.
-
-    To get the file:
-      1. Go to https://tranco-list.eu
-      2. Download latest list as CSV
-      3. Save to data/tranco_top1m.csv
+    Falls back to built-in REAL_BRAND_DOMAINS if file not found.
     """
     global _TRANCO_WHITELIST
     if os.path.exists(TRANCO_PATH):
@@ -237,14 +280,12 @@ def load_tranco_whitelist():
     else:
         logger.warning(
             f"Tranco file not found at {TRANCO_PATH}. "
-            "Using built-in expanded whitelist. "
-            "Download from https://tranco-list.eu for better coverage."
+            "Using built-in expanded whitelist."
         )
         _TRANCO_WHITELIST = set(REAL_BRAND_DOMAINS)
 
 
 def is_whitelisted(registered_domain: str) -> bool:
-    """Check if domain is in Tranco whitelist or built-in brand list."""
     rd = (registered_domain or "").lower()
     return rd in _TRANCO_WHITELIST or rd in REAL_BRAND_DOMAINS
 
@@ -272,11 +313,13 @@ HEURISTIC_FEATURE_NAMES = [
     "has_redirect",
     "double_slash_in_path",
     "abnormal_subdomain",
-    # 1 https bias fix (no WHOIS needed)
+    # 1 https bias fix
     "http_no_brand_no_age",
+    # 1 NEW: leet + brand combined score
+    "leet_brand_score",
 ]
 
-N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 56
+N_HEURISTIC = len(HEURISTIC_FEATURE_NAMES)  # 57
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -350,16 +393,45 @@ def max_repeating(s: str) -> int:
 # ═══════════════════════════════════════════════════════════════
 
 def detect_leet_speak(url: str) -> float:
+    """
+    FIX 3: Density-based leet speak score for the full URL.
+
+    Old version: only matched [a-z]digit[a-z] — missed word boundaries.
+    New version: counts ALL leet characters in the netloc and normalises
+    by domain length so longer domains don't score artificially high.
+
+    Returns float 0.0–1.0.
+    """
     url_lower = url.lower()
     try:
         domain_part = urlparse(url_lower).netloc
     except Exception:
         domain_part = url_lower
-    score = 0.0
-    for digit in ["4","3","1","0","5","7"]:
-        matches = re.findall(rf"[a-z]{re.escape(digit)}[a-z]", domain_part)
-        score  += len(matches) * 0.2
-    return min(score, 1.0)
+
+    if not domain_part:
+        return 0.0
+
+    # Strip port
+    domain_part = domain_part.split(":")[0]
+
+    # Count leet characters
+    leet_count = sum(1 for ch in domain_part if ch in _LEET_CHARS)
+    alpha_count = sum(1 for ch in domain_part if ch.isalpha())
+
+    if alpha_count == 0:
+        return 0.0
+
+    # Ratio: leet chars vs all alphabetic+leet chars
+    density = leet_count / (alpha_count + leet_count)
+
+    # Boost: multiple leet chars = strong signal
+    if leet_count >= 3:
+        return min(1.0, density * 2.0)
+    if leet_count >= 2:
+        return min(1.0, density * 1.5)
+    if leet_count >= 1:
+        return min(1.0, density * 1.0)
+    return 0.0
 
 
 def detect_homoglyph(url: str) -> float:
@@ -427,10 +499,44 @@ def brand_in_registered_domain(registered_domain: str) -> float:
 
 
 def leet_in_domain_only(domain: str) -> float:
+    """
+    FIX 2: Rewritten leet detection for the domain segment only.
+
+    Old version: only matched [a-z]digit[a-z] — missed:
+      - paypa1    (leet at end of word)
+      - 1nstagram (leet at start of word)
+      - g00gle    (double substitution)
+
+    New version checks:
+      1. Any leet character adjacent to at least one alphabetic char
+      2. Any double-leet substitution (e.g. 00, 11)
+      3. Domain contains a leet character AND its length is plausible
+
+    Returns 1.0 if leet detected, 0.0 otherwise.
+    """
     d = (domain or "").lower()
-    for digit in ["4","3","1","0","5","7"]:
-        if re.search(rf"[a-z]{re.escape(digit)}[a-z]", d):
+
+    if not d:
+        return 0.0
+
+    # Check each character
+    for i, ch in enumerate(d):
+        if ch not in _LEET_CHARS:
+            continue
+
+        # Has at least one adjacent alphabetic character (before or after)
+        prev_alpha = (i > 0 and d[i - 1].isalpha())
+        next_alpha = (i < len(d) - 1 and d[i + 1].isalpha())
+
+        if prev_alpha or next_alpha:
             return 1.0
+
+        # Double leet: two leet chars in a row (e.g. "00" in g00gle)
+        if i > 0 and d[i - 1] in _LEET_CHARS:
+            return 1.0
+        if i < len(d) - 1 and d[i + 1] in _LEET_CHARS:
+            return 1.0
+
     return 0.0
 
 
@@ -440,6 +546,92 @@ def brand_hyphen_suspicious_word(url: str) -> float:
         for word in BRAND_SUSPICIOUS_WORDS:
             if f"{brand}-{word}" in url_lower or f"{word}-{brand}" in url_lower:
                 return 1.0
+    return 0.0
+
+
+def decode_leet(text: str) -> list:
+    """
+    FIX 4 (NEW): Decode leet substitutions back to possible plain-text strings.
+
+    For each leet character, substitutes all possible alpha equivalents.
+    Returns a list of decoded candidate strings.
+
+    Example:
+      "g00gle" → ["google"]
+      "paypa1" → ["paypai", "paypal"]
+      "amaz0n" → ["amazon"]
+      "g00gl3" → ["google"]
+
+    We cap combinations to avoid exponential blowup on heavily leet text.
+    """
+    # Find positions of leet characters
+    leet_positions = [
+        (i, ch) for i, ch in enumerate(text)
+        if ch in LEET_DECODE_MAP
+    ]
+
+    if not leet_positions:
+        return [text]
+
+    # Cap at 4 leet characters to avoid combinatorial explosion
+    leet_positions = leet_positions[:4]
+
+    # Generate all combinations
+    candidates = [text]
+    for pos, leet_ch in leet_positions:
+        replacements = LEET_DECODE_MAP[leet_ch]
+        new_candidates = []
+        for candidate in candidates:
+            for replacement in replacements:
+                new_candidate = candidate[:pos] + replacement + candidate[pos + 1:]
+                new_candidates.append(new_candidate)
+        candidates = new_candidates
+
+    return list(set(candidates))
+
+
+def leet_brand_score(domain: str, registered_domain: str) -> float:
+    """
+    FIX 4 (NEW): Combined leet + brand detection.
+
+    Steps:
+      1. Check if domain contains any leet characters
+      2. Decode leet substitutions back to plain text
+      3. Check if any decoded form contains a known brand name
+      4. Make sure the registered_domain is NOT the real brand domain
+         (so google.com itself doesn't trigger)
+
+    Returns:
+      1.0  — leet characters found AND decoded to a known brand name
+      0.0  — no leet, or leet but doesn't match any brand
+
+    Examples:
+      g00gle.com      → decode → "google"  → in BRANDS → 1.0
+      paypa1.com      → decode → "paypal"  → in BRANDS → 1.0
+      amaz0n-login.tk → decode → "amazon"  → in BRANDS → 1.0
+      random123.com   → no leet adjacent to alpha       → 0.0
+      google.com      → real brand domain, no leet      → 0.0
+    """
+    d  = (domain or "").lower()
+    rd = (registered_domain or "").lower()
+
+    # Skip if no leet characters in domain at all
+    if not any(ch in _LEET_CHARS for ch in d):
+        return 0.0
+
+    # Skip if this is the real brand domain (whitelist)
+    if rd in REAL_BRAND_DOMAINS or is_whitelisted(rd):
+        return 0.0
+
+    # Decode leet and check against brands
+    candidates = decode_leet(d)
+    for candidate in candidates:
+        for brand in BRANDS:
+            if brand in candidate and candidate != d:
+                # Extra guard: the decoded form is different from original
+                # (i.e. actual leet substitution happened)
+                return 1.0
+
     return 0.0
 
 
@@ -484,7 +676,7 @@ def http_no_brand_no_age_feature(
     sus_word_count: int,
 ) -> float:
     """
-    Permanent HTTPS bias fix — NO WHOIS needed.
+    Permanent HTTPS bias fix — no WHOIS needed.
 
     Returns 1.0 only when ALL of these are true:
       1. URL is http (not https)
@@ -492,27 +684,17 @@ def http_no_brand_no_age_feature(
       3. At least one of:
            - TLD is in RISKY_TLDS
            - URL contains suspicious words
-           - Domain contains brand name (mismatch)
-
-    This means:
-      - Old legitimate http blogs → 0  (safe TLD, no suspicious words)
-      - New phishing http sites   → 1  (risky TLD or suspicious words)
-      - Known brand domains       → 0  (whitelisted)
     """
-    # https → safe, no penalty
     if url.startswith("https"):
         return 0.0
 
-    # whitelisted domain → give benefit of doubt
     if is_whitelisted(registered_domain):
         return 0.0
 
-    # safe TLD + no suspicious words → likely legit old http site
     tld_lower = (tld or "").lower()
     if tld_lower not in RISKY_TLDS and sus_word_count == 0:
         return 0.0
 
-    # http + not whitelisted + (risky TLD or suspicious words) → flag it
     return 1.0
 
 
@@ -521,7 +703,7 @@ def http_no_brand_no_age_feature(
 # ═══════════════════════════════════════════════════════════════
 
 def extract_heuristic_features(url: str) -> list:
-    """Extract all 56 heuristic features. No WHOIS calls."""
+    """Extract all 57 heuristic features. No WHOIS calls."""
     try:
         if not isinstance(url, str) or len(url) < 5:
             return [0.0] * N_HEURISTIC
@@ -604,7 +786,7 @@ def extract_heuristic_features(url: str) -> list:
             pass
 
         # obfuscation (6)
-        leet       = detect_leet_speak(url)
+        leet       = detect_leet_speak(url)        # FIX 3: rewritten
         homoglyph  = detect_homoglyph(url)
         enc_ratio  = calc_encoding_ratio(url)
         punycode   = detect_punycode(url)
@@ -613,7 +795,7 @@ def extract_heuristic_features(url: str) -> list:
 
         # rule-based (3)
         brand_in_dom   = brand_in_registered_domain(domain)
-        leet_dom       = leet_in_domain_only(ext.domain or "")
+        leet_dom       = leet_in_domain_only(ext.domain or "")  # FIX 2: rewritten
         brand_hyp_susp = brand_hyphen_suspicious_word(url)
 
         # domain-level (4)
@@ -631,10 +813,13 @@ def extract_heuristic_features(url: str) -> list:
         dbl_slash    = has_double_slash_in_path(url)
         abnormal_sub = is_abnormal_subdomain(subdomain)
 
-        # https bias fix (1) — no WHOIS needed
+        # https bias fix (1)
         http_no_brand_age = http_no_brand_no_age_feature(
             url, domain, tld, int(sus_words)
         )
+
+        # NEW: leet + brand combined score (1)
+        leet_brand = leet_brand_score(domain_str, domain)  # FIX 4
 
         return [
             # 39 structural
@@ -660,6 +845,8 @@ def extract_heuristic_features(url: str) -> list:
             has_redirect, dbl_slash, abnormal_sub,
             # 1 https bias fix
             http_no_brand_age,
+            # 1 NEW: leet brand score
+            leet_brand,
         ]
 
     except Exception:
@@ -826,9 +1013,9 @@ def process_split(name, path, char_vec, word_vec,
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    logger.info("FEATURE EXTRACTION — Final Fixed Version (No WHOIS)")
+    logger.info("FEATURE EXTRACTION — v2 (Leet Fix + TRANCO_PATH Fix)")
     logger.info("=" * 60)
-    logger.info(f"Heuristic features : {N_HEURISTIC}")
+    logger.info(f"Heuristic features : {N_HEURISTIC}  (added leet_brand_score)")
     logger.info(f"Char TF-IDF        : {MAX_FEAT_CHAR}")
     logger.info(f"Word TF-IDF        : {MAX_FEAT_WORD}")
     logger.info(f"Total features     : {N_HEURISTIC + MAX_FEAT_CHAR + MAX_FEAT_WORD}")
@@ -839,7 +1026,6 @@ def main():
             logger.error(f"Missing: {p} — run split.py first.")
             return
 
-    # Load Tranco whitelist (or fallback to built-in)
     load_tranco_whitelist()
 
     feature_names = (
@@ -872,8 +1058,7 @@ def main():
                   scaler, feature_names, TEST_OUT,  fit_scaler=False)
 
     logger.info("\n" + "="*60)
-    logger.info("DONE — Estimated runtime was 40-60 min for 300k URLs")
-    logger.info("Next step: train_model.py with class_weight='balanced'")
+    logger.info("DONE — Run train_model.py next")
     logger.info("="*60)
 
 
