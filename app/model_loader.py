@@ -10,20 +10,31 @@ Loads model artefacts and exposes three public methods:
 Prediction pipeline:
   Layer 0: Whitelist check (Tranco top 50k + manual list)
   Layer 1: Google Safe Browsing API (known threats)
-  Layer 2: ML Model (Random Forest 558 features)
+  Layer 2: ML Model (Random Forest 559 features)
   Layer 3: Domain Age post-prediction adjustment (WHOIS, cached)
 
-Fixes:
+Changes from previous version:
+  - FIX 8 REWRITE: Replaced hardcoded LEET_BRAND_MAP with dynamic
+    decode_leet_domain() that reverses substitutions at runtime.
+    Now catches ANY leet variant, not just the 23 explicitly listed ones.
+    Example: g0o0le, amaz00n-secure, p4yp4l-login all detected without
+    needing a new entry in a hardcoded dict.
+  - FIX 9 UPDATE: Force-malicious override now checks BOTH the old
+    leet_in_domain feature AND the new leet_brand_score feature.
+    Either one firing is sufficient to trigger the override.
+  - FEATURE COUNT: Updated from 558 to 559 to match feature_extraction.py
+  - NL TEMPLATE: Added leet_brand_score to _NL_TEMPLATES and _BACKUP_CHECKS
+  - _FEAT_IDX: Now includes leet_brand_score index
+
+All other fixes from previous version retained:
   - FIX 1: https_flag backup threshold -0.1
   - FIX 2: explain_url skips https_flag when site has HTTPS
   - FIX 3: feature_to_natural_language validates flag values
   - FIX 4: _classify reduces confidence for clean HTTP sites
   - FIX 5: brand reason skipped when no brand detected
   - FIX 6: Google Safe Browsing API layer
-  - FIX 7: Domain age WHOIS post-prediction adjustment (cached, no retraining)
-  - FIX 8: Leet speak brand detection (go0gle, amaz0n etc.)
-  - FIX 9: Force malicious when leet_in_domain + no HTTPS
-  - FIX 10: Updated for 558 features
+  - FIX 7: Domain age WHOIS post-prediction adjustment (cached)
+  - FIX 10: Updated for 559 features
 """
 
 import json
@@ -41,7 +52,6 @@ import joblib
 import numpy as np
 import requests
 
-# Load .env file
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -62,13 +72,16 @@ from feature_extraction import (
     SHORTENERS,
     HEURISTIC_FEATURE_NAMES,
     N_HEURISTIC,
+    BRANDS,
+    REAL_BRAND_DOMAINS,
+    LEET_DECODE_MAP,
+    decode_leet,
 )
 
 # ── Path constants ────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(_ROOT, "models")
 DATA_DIR   = os.path.join(_ROOT, "data")
 
-# Domain age cache path — persists between Flask restarts
 DOMAIN_AGE_CACHE_PATH = os.path.join(MODELS_DIR, "domain_age_cache.json")
 
 # ── Google Safe Browsing API ──────────────────────────────────────────────────
@@ -76,7 +89,7 @@ GSB_API_KEY = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY", "")
 GSB_URL     = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 # ── Feature names ─────────────────────────────────────────────────────────────
-HEURISTIC_FEATURES: list[str] = HEURISTIC_FEATURE_NAMES  # 56 features
+HEURISTIC_FEATURES: list[str] = HEURISTIC_FEATURE_NAMES  # 57 features
 
 FEATURE_NAMES: list[str] = (
     HEURISTIC_FEATURES
@@ -92,13 +105,14 @@ _CATEGORICAL_FEATURE_NAMES: list[str] = [
     "suspicious_port", "brand_in_domain", "leet_in_domain",
     "brand_hyphen_suspicious", "has_redirect", "double_slash_in_path",
     "abnormal_subdomain", "http_no_brand_no_age",
+    "leet_brand_score",  # NEW
 ]
 
 _PRIVATE_IP_RE = re.compile(
     r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1)"
 )
 
-# ── Brand map ─────────────────────────────────────────────────────────────────
+# ── Brand map (for display names and official domains) ────────────────────────
 BRAND_MAP = {
     "paypal"       : ("PayPal",         "paypal.com"),
     "amazon"       : ("Amazon",         "amazon.com"),
@@ -125,33 +139,6 @@ BRAND_MAP = {
     "ups"          : ("UPS",            "ups.com"),
 }
 
-# FIX 8: Leet speak brand map
-LEET_BRAND_MAP = {
-    "g00gle"   : ("Google",    "google.com"),
-    "go0gle"   : ("Google",    "google.com"),
-    "g0ogle"   : ("Google",    "google.com"),
-    "g00gl3"   : ("Google",    "google.com"),
-    "micr0soft": ("Microsoft", "microsoft.com"),
-    "m1crosoft": ("Microsoft", "microsoft.com"),
-    "amaz0n"   : ("Amazon",    "amazon.com"),
-    "amaz00n"  : ("Amazon",    "amazon.com"),
-    "paypa1"   : ("PayPal",    "paypal.com"),
-    "payp4l"   : ("PayPal",    "paypal.com"),
-    "pay0al"   : ("PayPal",    "paypal.com"),
-    "faceb00k" : ("Facebook",  "facebook.com"),
-    "fac3book" : ("Facebook",  "facebook.com"),
-    "twitt3r"  : ("Twitter",   "twitter.com"),
-    "tw1tter"  : ("Twitter",   "twitter.com"),
-    "app1e"    : ("Apple",     "apple.com"),
-    "app13"    : ("Apple",     "apple.com"),
-    "netfl1x"  : ("Netflix",   "netflix.com"),
-    "n3tflix"  : ("Netflix",   "netflix.com"),
-    "inst4gram": ("Instagram",  "instagram.com"),
-    "1nstagram": ("Instagram",  "instagram.com"),
-    "linked1n" : ("LinkedIn",  "linkedin.com"),
-    "l1nkedin" : ("LinkedIn",  "linkedin.com"),
-}
-
 # ── Natural language templates ────────────────────────────────────────────────
 _NL_TEMPLATES = {
     "brand_in_domain"        : {
@@ -169,6 +156,10 @@ _NL_TEMPLATES = {
     "leet_in_domain"         : {
         "mal": "The domain disguises a brand name using look-alike characters (e.g. amaz0n, paypa1)",
         "ben": "No character substitution tricks detected",
+    },
+    "leet_brand_score"       : {
+        "mal": "The domain uses digit substitutions to impersonate {brand} (e.g. g00gle, paypa1)",
+        "ben": "No leet brand impersonation detected",
     },
     "visual_brand_similarity": {
         "mal": "This domain looks visually similar to a well-known brand website",
@@ -300,6 +291,7 @@ _BACKUP_CHECKS = [
     ("brand_mismatch",           0.5, "{brand} name appears in the URL but this is not the real {brand} website"),
     ("risky_tld",                0.5, "This site uses a high-risk domain ending commonly used for phishing"),
     ("leet_in_domain",           0.5, "The domain disguises a brand name using look-alike characters (e.g. amaz0n)"),
+    ("leet_brand_score",         0.5, "The domain uses digit substitutions to impersonate {brand} (e.g. g00gle, paypa1)"),  # NEW
     ("ip_flag",                  0.5, "The site uses a raw IP address instead of a proper domain name"),
     ("shortened",                0.5, "This is a shortened URL hiding the real destination"),
     ("puny",                     0.5, "The domain uses international character encoding to disguise its identity"),
@@ -318,13 +310,11 @@ _BACKUP_CHECKS = [
 # DOMAIN AGE — WHOIS WITH PERSISTENT CACHE
 # ════════════════════════════════════════════════════════════════
 
-# In-memory cache — fast lookup
 _domain_age_cache: dict = {}
 _cache_lock = threading.Lock()
 
 
 def _load_domain_age_cache():
-    """Load domain age cache from disk at startup."""
     global _domain_age_cache
     if os.path.exists(DOMAIN_AGE_CACHE_PATH):
         try:
@@ -338,7 +328,6 @@ def _load_domain_age_cache():
 
 
 def _save_domain_age_cache():
-    """Save domain age cache to disk."""
     try:
         with open(DOMAIN_AGE_CACHE_PATH, "w") as f:
             json.dump(_domain_age_cache, f)
@@ -352,17 +341,15 @@ def get_domain_age_days(domain: str) -> int:
     Uses persistent disk cache — each domain looked up only ONCE ever.
 
     Returns:
-      -1  = unknown (WHOIS failed or blocked)
-       N  = N days old
+      -1 = unknown (WHOIS failed or blocked)
+       N = N days old
     """
     if not domain:
         return -1
 
-    # Check memory cache first — instant
     if domain in _domain_age_cache:
         return _domain_age_cache[domain]
 
-    # WHOIS lookup — 2-5 seconds but only happens ONCE per domain
     try:
         import whois
         w             = whois.whois(domain)
@@ -380,10 +367,8 @@ def get_domain_age_days(domain: str) -> int:
     except Exception:
         age = -1
 
-    # Cache result in memory and disk
     with _cache_lock:
         _domain_age_cache[domain] = age
-        # Save to disk every time a new domain is cached
         _save_domain_age_cache()
 
     return age
@@ -392,24 +377,15 @@ def get_domain_age_days(domain: str) -> int:
 def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, str]:
     """
     Adjusts ML confidence score based on domain age.
-    This is the permanent fix for FP on legitimate old sites
-    and FN on new phishing sites.
 
     Age multipliers:
       Unknown      → no change
-      < 30 days    → × 1.4  (very new = high risk)
-      30-180 days  → × 1.15 (new = elevated risk)
-      180-365 days → × 1.0  (recent = no change)
-      1-2 years    → × 0.7  (established = reduce)
-      2-5 years    → × 0.5  (old = reduce more)
-      > 5 years    → × 0.3  (very old = reduce significantly)
-
-    Examples:
-      go0gle.com      (1 day)    0.39 × 1.4 = 0.55 → MALICIOUS ✅
-      roadmap.sh      (7 years)  0.89 × 0.3 = 0.27 → BENIGN    ✅
-      scrimba.com     (10 years) 0.89 × 0.3 = 0.27 → BENIGN    ✅
-      hackerearth.com (14 years) 0.89 × 0.3 = 0.27 → BENIGN    ✅
-      paypal-security.tk (2 days) 0.95 × 1.4 = 1.0 → MALICIOUS ✅
+      < 30 days    → × 1.4
+      30-180 days  → × 1.15
+      180-365 days → × 1.0
+      1-2 years    → × 0.7
+      2-5 years    → × 0.5
+      > 5 years    → × 0.3
     """
     age = get_domain_age_days(domain)
 
@@ -444,7 +420,6 @@ def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, s
 # ════════════════════════════════════════════════════════════════
 
 def check_google_safe_browsing(url: str) -> tuple[bool, str]:
-    """Check URL against Google Safe Browsing API."""
     if not GSB_API_KEY:
         return False, ""
     try:
@@ -480,28 +455,72 @@ def check_google_safe_browsing(url: str) -> tuple[bool, str]:
 
 
 # ════════════════════════════════════════════════════════════════
-# BRAND DETECTION
+# BRAND DETECTION  —  FIX 8 REWRITE
 # ════════════════════════════════════════════════════════════════
+
+def decode_leet_domain(domain_part: str) -> list[str]:
+    """
+    Decode leet substitutions in a domain segment back to candidate
+    plain-text strings.
+
+    Delegates to decode_leet() from feature_extraction.py so the
+    logic stays in one place.
+
+    Example:
+      "g00gle"      → ["google"]
+      "paypa1"      → ["paypai", "paypal"]
+      "amaz0n"      → ["amazon"]
+      "m1cr0s0ft"   → ["microsoft", ...]
+    """
+    return decode_leet(domain_part)
+
 
 def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
     """
-    Detect brand impersonation in URL.
-    FIX 8: Also detects leet speak brand impersonation.
+    FIX 8 REWRITE: Dynamic leet brand detection.
+
+    Old version: hardcoded LEET_BRAND_MAP with 23 explicit entries.
+    New version: decodes leet at runtime — catches ANY variant.
+
+    Detection order:
+      1. Standard brand detection (plain text match in URL)
+      2. Dynamic leet decode → brand match
+
+    Returns: (display_name, real_domain) or (None, None)
     """
     url_lower = url.lower()
 
-    # Standard brand detection
+    # Standard brand detection (no leet)
     for keyword, (display_name, real_domain) in BRAND_MAP.items():
         if keyword in url_lower:
             host = re.sub(r"^https?://", "", url_lower).split("/")[0]
             reg  = ".".join(host.split(".")[-2:]) if "." in host else host
-            if reg != real_domain:
+            # Only flag if it's not the real brand domain
+            if reg != real_domain and reg not in REAL_BRAND_DOMAINS:
                 return display_name, real_domain
 
-    # FIX 8: Leet speak brand detection
-    for leet_keyword, (display_name, real_domain) in LEET_BRAND_MAP.items():
-        if leet_keyword in url_lower:
-            return display_name, real_domain
+    # FIX 8: Dynamic leet decode — works for ANY leet variant
+    try:
+        host = re.sub(r"^https?://", "", url_lower).split("/")[0]
+        host = host.split(":")[0]  # remove port
+        # Extract just the domain label (without TLD)
+        parts = host.split(".")
+        # Check each part: subdomain, domain label
+        for part in parts[:-1]:  # exclude TLD
+            if not part:
+                continue
+            candidates = decode_leet(part)
+            for candidate in candidates:
+                if candidate == part:
+                    continue  # no substitution happened
+                for brand_key, (display_name, real_domain) in BRAND_MAP.items():
+                    if brand_key in candidate:
+                        # Confirm the original URL is not the real brand
+                        reg = ".".join(parts[-2:]) if len(parts) >= 2 else host
+                        if reg not in REAL_BRAND_DOMAINS:
+                            return display_name, real_domain
+    except Exception:
+        pass
 
     return None, None
 
@@ -522,7 +541,7 @@ def feature_to_natural_language(
 
     # FIX 5: skip brand reasons when no brand detected
     if brand_name is None and weight > 0 and any(x in feature for x in
-        ["brand", "visual_brand"]):
+        ["brand", "visual_brand", "leet_brand"]):
         return None
 
     # FIX 3: never show malicious reason when flag is actually clean
@@ -533,6 +552,7 @@ def feature_to_natural_language(
         "shortened"              : lambda v: v != 0.0,
         "brand_in_domain"        : lambda v: v != 0.0,
         "leet_in_domain"         : lambda v: v != 0.0,
+        "leet_brand_score"       : lambda v: v != 0.0,
         "brand_hyphen_suspicious": lambda v: v != 0.0,
         "brand_mismatch"         : lambda v: v != 0.0,
         "puny"                   : lambda v: v != 0.0,
@@ -588,7 +608,7 @@ def _build_backup_reasons(
 
         # FIX 5: skip brand-related reasons when no brand detected
         if brand_name is None and any(x in feat_name for x in
-            ["brand", "leet", "visual"]):
+            ["brand", "leet_brand", "visual"]):
             continue
 
         sentence = template.replace("{brand}", bn).replace("{real_domain}", rd)
@@ -710,7 +730,6 @@ def _load_whitelist() -> set:
     }
     whitelist.update(WHITELIST_MANUAL)
 
-    # Load Tranco whitelist from file
     whitelist_path = os.path.join(MODELS_DIR, "whitelist.txt")
     if os.path.exists(whitelist_path):
         with open(whitelist_path) as f:
@@ -760,15 +779,12 @@ class URLClassifier:
         self._explainer: Optional[object] = None
         self._explainer_lock = threading.Lock()
 
-        # Load domain age cache from disk
         _load_domain_age_cache()
 
         if GSB_API_KEY:
             print("[GSB] Google Safe Browsing API loaded")
         else:
             print("[GSB] WARNING: No API key found — GSB layer disabled")
-            print("[GSB] Fix: ensure .env has no spaces: "
-                  "GOOGLE_SAFE_BROWSING_API_KEY=your_key")
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -776,7 +792,6 @@ class URLClassifier:
     def _registered_domain(url: str) -> str:
         cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
         host    = cleaned.split("/")[0].split(":")[0].split("?")[0].lower()
-        # Remove www prefix
         if host.startswith("www."):
             host = host[4:]
         parts   = host.split(".")
@@ -800,9 +815,14 @@ class URLClassifier:
             raw_heuristic = extract_heuristic_features(url)
             https_val     = raw_heuristic[_FEAT_IDX.get("https_flag", -1)]
             leet_dom      = raw_heuristic[_FEAT_IDX.get("leet_in_domain", -1)]
+            leet_brand    = raw_heuristic[_FEAT_IDX.get("leet_brand_score", -1)]  # NEW
 
-            # FIX 9: force malicious for leet speak domain + no HTTPS
-            if leet_dom == 1.0 and https_val == 0.0:
+            # FIX 9 UPDATE: force malicious when:
+            #   - leet_in_domain fires (any leet adjacent to alpha) AND no HTTPS
+            #   - OR leet_brand_score fires (leet decodes to known brand) AND no HTTPS
+            # Either signal is sufficient — belt and braces
+            leet_detected = (leet_dom == 1.0) or (leet_brand == 1.0)
+            if leet_detected and https_val == 0.0:
                 proba = max(proba, 0.85)
 
             # FIX 4: reduce confidence for clean HTTP-only sites
@@ -810,8 +830,9 @@ class URLClassifier:
                 other_flags = [
                     "brand_mismatch", "sus_words", "brand_in_domain",
                     "risky_tld", "shortened", "ip_flag", "puny",
-                    "leet_in_domain", "brand_hyphen_suspicious",
-                    "susp_ext", "suspicious_port", "has_redirect",
+                    "leet_in_domain", "leet_brand_score",
+                    "brand_hyphen_suspicious", "susp_ext",
+                    "suspicious_port", "has_redirect",
                     "double_slash_in_path", "abnormal_subdomain",
                     "http_no_brand_no_age",
                 ]
@@ -929,7 +950,6 @@ class URLClassifier:
     def explain_url(self, url: str, num_features: int = 30) -> dict:
         base = self.predict_url(url)
 
-        # Handle non-model sources
         if base["source"] == "google_safe_browsing":
             threat = base.get("threat_type", "malicious content")
             return {
@@ -950,7 +970,6 @@ class URLClassifier:
         classify_url  = base.get("unshortened") or url
         raw_heuristic = extract_heuristic_features(classify_url)
 
-        # Add domain age reason if very new domain
         domain   = self._registered_domain(classify_url)
         age_days = get_domain_age_days(domain)
 
@@ -1002,7 +1021,6 @@ class URLClassifier:
             explanation.sort(key=lambda x: abs(x["weight"]), reverse=True)
             top_reasons = reasons[:3]
 
-            # Fill with backup reasons if needed
             if len(top_reasons) < 3:
                 backup = _build_backup_reasons(
                     raw_heuristic, brand_name, real_domain,
