@@ -8,8 +8,8 @@ Two-layer prediction:
   Layer 1: Whitelist  — known trusted domains bypass ML model
   Layer 2: ML model   — unknown domains run through full pipeline
 
-Feature count: 558
-  56 heuristic + obfuscation + rule-based + domain + new structural features
+Feature count: 559
+  57 heuristic + obfuscation + rule-based + domain + new structural features
  300 char n-gram TF-IDF
  202 word n-gram TF-IDF
 
@@ -55,10 +55,10 @@ from feature_extraction import (
 )
 
 # ---------------- EXPECTED FEATURE COUNT ----------------
-EXPECTED_HEURISTIC = 56   # 56 heuristic features
+EXPECTED_HEURISTIC = 57   # 56 heuristic features
 EXPECTED_CHAR      = 300  # char n-gram TF-IDF
 EXPECTED_WORD      = 202  # word n-gram TF-IDF
-EXPECTED_TOTAL     = EXPECTED_HEURISTIC + EXPECTED_CHAR + EXPECTED_WORD  # 558
+EXPECTED_TOTAL     = EXPECTED_HEURISTIC + EXPECTED_CHAR + EXPECTED_WORD # 559
 
 # ---------------- WHITELIST ----------------
 TRUSTED_DOMAINS = {
