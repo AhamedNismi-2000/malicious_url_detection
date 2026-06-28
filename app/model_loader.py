@@ -820,10 +820,20 @@ class URLClassifier:
             # FIX 9 UPDATE: force malicious when:
             #   - leet_in_domain fires (any leet adjacent to alpha) AND no HTTPS
             #   - OR leet_brand_score fires (leet decodes to known brand) AND no HTTPS
-            # Either signal is sufficient — belt and braces
+            # EARLY RETURN: skip domain age entirely for leet domains
+            # because aged domain cache was crushing 0.85 → 0.255
+            # (0.85 × 0.3 multiplier = 25.5% — exactly the bug we saw)
             leet_detected = (leet_dom == 1.0) or (leet_brand == 1.0)
             if leet_detected and https_val == 0.0:
                 proba = max(proba, 0.85)
+                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+                return {
+                    "prediction": label,
+                    "confidence": round(proba * 100, 2),
+                    "threshold" : round(self.threshold * 100, 2),
+                    "source"    : "model",
+                    "domain_age": "skipped_leet",
+                }
 
             # FIX 4: reduce confidence for clean HTTP-only sites
             if https_val == 0.0 and proba < 0.80:
