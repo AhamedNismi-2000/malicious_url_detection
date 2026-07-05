@@ -14,16 +14,11 @@ Prediction pipeline:
   Layer 3: Domain Age post-prediction adjustment (WHOIS, cached)
 
 Fixes in this version:
-  - FIX 11: Smart whitelist — replaces simple registered_domain check
-      Problem 1: Legit subdomains (mail.google.com, docs.python.org)
-                 were going to ML because only "google.com" is whitelisted
-                 not "mail.google.com". Now trusted subdomains pass through.
-      Problem 2: Attacker uses google.com.evil.tk — old code extracted
-                 evil.tk (not whitelisted, correct) but mail.google.com
-                 extracted google.com (whitelisted, bypassed ML — wrong).
-                 New code handles both correctly via _is_safe_whitelist_url().
-  - FIX 9: Early return for leet domains — skips domain age adjustment
-      so 0.85 override is not crushed to 0.255 by age multiplier.
+  - FIX 9:  Leet override — early return skips domain age (0.85 not crushed)
+  - FIX 11: Smart whitelist — trusted subdomains + bypass attack detection
+  - FIX 12: Suspicious word in domain label (phishing.ru, malware.tk)
+  - FIX 13: Brand impersonation + no HTTPS → force malicious
+  - FIX 14: Raw IP address + no HTTPS → force malicious
 
 All previous fixes retained:
   - FIX 1:  https_flag backup threshold -0.1
@@ -107,6 +102,16 @@ _CATEGORICAL_FEATURE_NAMES: list[str] = [
     "leet_brand_score",
 ]
 
+# FIX 12: words that should never appear in a legitimate domain label
+_DOMAIN_SUSPICIOUS_WORDS: set[str] = {
+    "phishing", "malware", "trojan", "virus", "hack",
+    "steal", "crack", "cheat", "fraud", "scam",
+    "evil", "danger", "threat", "attack", "exploit",
+    "payload", "botnet", "ransomware", "spyware",
+    "keylogger", "rootkit", "worm", "phish", "pwn",
+    "shell", "backdoor", "owned",
+}
+
 _PRIVATE_IP_RE = re.compile(
     r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1)"
 )
@@ -142,10 +147,7 @@ BRAND_MAP = {
 }
 
 # ── FIX 11: Trusted subdomain prefixes ───────────────────────────────────────
-# Subdomains on these prefixes of a whitelisted domain are considered safe.
-# If a subdomain is NOT in this set it goes to the ML model instead.
 TRUSTED_SUBDOMAIN_PREFIXES: set[str] = {
-    # Common functional subdomains
     "www", "mail", "email", "webmail",
     "docs", "doc", "help", "support", "status",
     "api", "apis", "dev", "developer", "developers",
@@ -158,12 +160,9 @@ TRUSTED_SUBDOMAIN_PREFIXES: set[str] = {
     "video", "videos", "stream",
     "search", "maps", "translate",
     "careers", "jobs", "about", "corporate",
-    # Regional / mobile
     "m", "mobile", "wap",
     "en", "us", "uk", "au", "ca", "in", "de", "fr",
-    # Cloud / infra
     "cloud", "aws", "azure",
-    # Numeric / versioned (e.g. v2.api.example.com)
     "v1", "v2", "v3",
 }
 
@@ -176,60 +175,44 @@ def _load_whitelist() -> set:
     whitelist = set()
 
     WHITELIST_MANUAL = {
-        # Major search and tech
         "google.com", "gmail.com", "youtube.com", "googleapis.com",
         "google.co.uk", "google.com.au", "google.ca", "google.in",
         "github.com", "gitlab.com", "stackoverflow.com",
         "wikipedia.org", "wikimedia.org",
-        # Microsoft
         "microsoft.com", "microsoftonline.com", "live.com",
         "outlook.com", "office.com", "azure.com", "bing.com",
-        # Apple
         "apple.com", "icloud.com",
-        # Amazon
         "amazon.com", "amazon.co.uk", "amazon.de", "amazon.fr",
         "amazonaws.com",
-        # Social
         "facebook.com", "instagram.com", "twitter.com", "x.com",
         "linkedin.com", "reddit.com", "pinterest.com",
         "whatsapp.com", "telegram.org", "discord.com",
-        # Finance
         "paypal.com", "bankofamerica.com", "chase.com",
         "wellsfargo.com", "citibank.com", "visa.com",
         "mastercard.com", "stripe.com",
-        # Entertainment
         "netflix.com", "spotify.com", "twitch.tv",
         "slack.com", "zoom.us",
-        # Shopping
         "ebay.com", "etsy.com", "shopify.com",
-        # Tools
         "dropbox.com", "adobe.com", "salesforce.com",
         "wordpress.com", "medium.com",
-        # Developer sites
         "roadmap.sh", "dev.to", "freecodecamp.org",
         "scrimba.com", "codecademy.com", "hashnode.com",
         "hackerearth.com", "hackerrank.com", "leetcode.com",
         "codechef.com", "codeforces.com", "kaggle.com",
         "replit.com", "codepen.io", "codesandbox.io",
         "exercism.org", "theodinproject.com",
-        # Programming language / framework sites
         "python.org", "nodejs.org", "rust-lang.org", "golang.org",
         "reactjs.org", "vuejs.org", "angular.io", "svelte.dev",
         "nextjs.org", "djangoproject.com", "flask.palletsprojects.com",
         "npmjs.com", "pypi.org", "crates.io",
-        # Job boards
         "dailyremote.com", "jobspresso.co", "remoteok.com",
         "weworkremotely.com", "flexjobs.com", "remote.co",
         "wellfound.com", "monster.com", "ziprecruiter.com",
         "indeed.com", "glassdoor.com",
-        # Media
         "4kwallpapers.com", "unsplash.com", "pexels.com",
-        # Other legit
         "neverssl.com", "httpforever.com",
-        # Cloud / hosting
         "vercel.com", "netlify.com", "heroku.com",
         "digitalocean.com", "cloudflare.com",
-        # News
         "bbc.com", "bbc.co.uk", "cnn.com", "reuters.com",
         "nytimes.com", "theguardian.com", "bloomberg.com",
     }
@@ -247,6 +230,8 @@ def _load_whitelist() -> set:
         print(f"[Whitelist] whitelist.txt not found — using manual list "
               f"({len(whitelist)} domains)")
 
+    # FIX: Remove URL shorteners — they must go to ML, not bypass it
+    whitelist = whitelist - SHORTENERS
     return whitelist
 
 
@@ -259,79 +244,44 @@ WHITELIST = _load_whitelist()
 
 def _is_safe_whitelist_url(url: str) -> bool:
     """
-    FIX 11: Smart whitelist check that fixes two problems:
+    Smart whitelist check — fixes subdomain handling and bypass attacks.
 
-    PROBLEM 1 — Legit subdomains flagged as malicious:
-      https://mail.google.com     → google.com in whitelist
-                                  → subdomain "mail" is trusted → BENIGN ✓
-      https://docs.python.org     → python.org in whitelist
-                                  → subdomain "docs" is trusted → BENIGN ✓
-      https://api.github.com      → github.com in whitelist
-                                  → subdomain "api" is trusted  → BENIGN ✓
-
-    PROBLEM 2 — Attacker spoofs whitelisted domain in subdomain:
-      http://google.com.evil.tk   → registered = evil.tk
-                                  → NOT in whitelist → goes to ML ✓
-      http://paypal.verify-now.net→ registered = verify-now.net
-                                  → NOT in whitelist → goes to ML ✓
-
-    PROBLEM 3 — Suspicious subdomain on whitelisted domain:
-      http://randomhex8f3a.google.com → google.com whitelisted
-                                      → subdomain "randomhex8f3a" not trusted
-                                      → goes to ML ✓
-
-    Logic:
-      1. Extract registered domain using tldextract
-      2. If NOT in whitelist → return False (goes to ML)
-      3. If no subdomain → return True (clean root domain)
-      4. If subdomain contains brand name → spoofing attempt → False
-      5. If all subdomain parts are trusted prefixes → True
-      6. Otherwise → False (goes to ML to decide)
+    Returns True (BENIGN) only when:
+      - registered domain is whitelisted AND
+      - subdomain is either absent or all parts are trusted prefixes AND
+      - no brand spoofing in subdomain
     """
     try:
-        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
-        host    = cleaned.split("/")[0].split(":")[0].lower()
-        ext     = _EXTRACTOR(host)
-
+        cleaned    = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
+        host       = cleaned.split("/")[0].split(":")[0].lower()
+        ext        = _EXTRACTOR(host)
         registered = ext.registered_domain or ""
         subdomain  = (ext.subdomain or "").strip()
 
-        # Step 1: registered domain must be whitelisted
         if registered not in WHITELIST:
             return False
 
-        # Step 2: no subdomain at all → clean root domain → safe
         if not subdomain:
             return True
 
-        # Step 3: remove leading "www" — www.google.com is always safe
         sub_parts = [p for p in subdomain.split(".") if p and p != "www"]
         if not sub_parts:
             return True
 
-        # Step 4: check if any subdomain part looks like a brand domain
-        # e.g. subdomain = "paypal.com" in "paypal.com.evil.tk"
-        # This is the spoofing attack — brand name used as subdomain
+        # Check for brand spoofing in subdomain
         for part in sub_parts:
-            # Check if part itself is a whitelisted domain label
-            # e.g. "google" in "google.evil.tk" → spoofing
             for wl_domain in WHITELIST:
-                wl_label = wl_domain.split(".")[0]  # e.g. "google" from "google.com"
+                wl_label = wl_domain.split(".")[0]
                 if part == wl_label and registered != wl_domain:
-                    # Brand label used as subdomain on different domain → spoof
                     return False
-            # Also check brand map keywords directly
             for brand_key in BRAND_MAP:
                 if part == brand_key and registered not in REAL_BRAND_DOMAINS:
                     return False
 
-        # Step 5: all remaining subdomain parts must be trusted prefixes
-        all_trusted = all(p in TRUSTED_SUBDOMAIN_PREFIXES for p in sub_parts)
-        if all_trusted:
+        # All subdomain parts must be trusted prefixes
+        if all(p in TRUSTED_SUBDOMAIN_PREFIXES for p in sub_parts):
             return True
 
-        # Step 6: unknown subdomain → let ML decide
-        # e.g. "randomhex8f3a.google.com" or "xyz123.github.com"
         return False
 
     except Exception:
@@ -485,7 +435,6 @@ _NL_TEMPLATES = {
     },
 }
 
-# ── Backup rule-based checks ──────────────────────────────────────────────────
 _BACKUP_CHECKS = [
     ("brand_in_domain",         0.5, "This site is pretending to be {brand} — the real website is {real_domain}"),
     ("brand_hyphen_suspicious", 0.5, "The domain uses a fake {brand} pattern (e.g. {brand}-security.com)"),
@@ -538,11 +487,6 @@ def _save_domain_age_cache():
 
 
 def get_domain_age_days(domain: str) -> int:
-    """
-    Returns domain age in days via WHOIS.
-    Uses persistent disk cache — each domain looked up only ONCE ever.
-    Returns -1 if unknown.
-    """
     if not domain:
         return -1
     if domain in _domain_age_cache:
@@ -568,18 +512,6 @@ def get_domain_age_days(domain: str) -> int:
 
 
 def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, str]:
-    """
-    Adjusts ML confidence score based on domain age.
-
-    Multipliers:
-      Unknown      → no change
-      < 30 days    → × 1.4
-      30-180 days  → × 1.15
-      180-365 days → × 1.0
-      1-2 years    → × 0.7
-      2-5 years    → × 0.5
-      > 5 years    → × 0.3
-    """
     age = get_domain_age_days(domain)
     if age < 0:
         return proba, "unknown"
@@ -628,20 +560,12 @@ def check_google_safe_browsing(url: str) -> tuple[bool, str]:
 
 
 # ════════════════════════════════════════════════════════════════
-# BRAND DETECTION  —  FIX 8 REWRITE (dynamic leet decode)
+# BRAND DETECTION
 # ════════════════════════════════════════════════════════════════
 
 def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
-    """
-    Detects brand impersonation in URL.
-
-    Order:
-      1. Plain-text brand match
-      2. Dynamic leet decode → brand match (catches ANY leet variant)
-    """
     url_lower = url.lower()
 
-    # Standard detection
     for keyword, (display_name, real_domain) in BRAND_MAP.items():
         if keyword in url_lower:
             host = re.sub(r"^https?://", "", url_lower).split("/")[0]
@@ -649,11 +573,10 @@ def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
             if reg != real_domain and reg not in REAL_BRAND_DOMAINS:
                 return display_name, real_domain
 
-    # Dynamic leet decode
     try:
         host  = re.sub(r"^https?://", "", url_lower).split("/")[0].split(":")[0]
         parts = host.split(".")
-        for part in parts[:-1]:   # exclude TLD
+        for part in parts[:-1]:
             if not part:
                 continue
             for candidate in decode_leet(part):
@@ -684,13 +607,11 @@ def feature_to_natural_language(
     if feature.startswith("char_") or feature.startswith("word_"):
         return None
 
-    # FIX 5: skip brand reasons when no brand detected
     if brand_name is None and weight > 0 and any(
         x in feature for x in ["brand", "visual_brand", "leet_brand"]
     ):
         return None
 
-    # FIX 3: never show malicious reason when flag is actually clean
     _flag_sanity = {
         "https_flag"             : lambda v: v != 1.0,
         "ip_flag"                : lambda v: v != 0.0,
@@ -876,9 +797,8 @@ class URLClassifier:
             leet_dom  = raw[_FEAT_IDX.get("leet_in_domain",  -1)]
             leet_br   = raw[_FEAT_IDX.get("leet_brand_score",-1)]
 
-            # FIX 9: leet override — EARLY RETURN skips domain age
+            # FIX 9: leet override — early return skips domain age
             # Without early return: 0.85 × 0.3 (old domain) = 0.255 → BENIGN (bug)
-            # With early return: 0.85 → MALICIOUS always ✓
             leet_detected = (leet_dom == 1.0) or (leet_br == 1.0)
             if leet_detected and https_val == 0.0:
                 proba = max(proba, 0.85)
@@ -891,21 +811,64 @@ class URLClassifier:
                     "domain_age": "skipped_leet",
                 }
 
+            # FIX 12: suspicious word in domain label
+            # e.g. phishing.ru, malware.tk, trojan.xyz
+            domain_label = self._registered_domain(url).split(".")[0].lower()
+            if any(w in domain_label for w in _DOMAIN_SUSPICIOUS_WORDS):
+                proba = max(proba, 0.90)
+                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+                return {
+                    "prediction": label,
+                    "confidence": round(proba * 100, 2),
+                    "threshold" : round(self.threshold * 100, 2),
+                    "source"    : "model",
+                    "domain_age": "skipped_suspicious_domain",
+                }
+
+            # FIX 13: brand impersonation + no HTTPS
+            # e.g. microsoft-support-center.com (44.6% — just below threshold)
+            brand_in_dom   = raw[_FEAT_IDX.get("brand_in_domain",  -1)]
+            brand_mismatch = raw[_FEAT_IDX.get("brand_mismatch",   -1)]
+            if (brand_in_dom == 1.0 or brand_mismatch == 1.0) and https_val == 0.0:
+                proba = max(proba, 0.85)
+                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+                return {
+                    "prediction": label,
+                    "confidence": round(proba * 100, 2),
+                    "threshold" : round(self.threshold * 100, 2),
+                    "source"    : "model",
+                    "domain_age": "skipped_brand_impersonation",
+                }
+
+            # FIX 14: raw IP address + no HTTPS
+            # e.g. http://185.220.101.45/steal/credentials (8.8% — way below threshold)
+            ip_flag_val = raw[_FEAT_IDX.get("ip_flag", -1)]
+            if ip_flag_val == 1.0 and https_val == 0.0:
+                proba = max(proba, 0.85)
+                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+                return {
+                    "prediction": label,
+                    "confidence": round(proba * 100, 2),
+                    "threshold" : round(self.threshold * 100, 2),
+                    "source"    : "model",
+                    "domain_age": "skipped_ip",
+                }
+
             # FIX 4: reduce confidence for clean HTTP sites
             if https_val == 0.0 and proba < 0.80:
                 other_flags = [
-                    "brand_mismatch","sus_words","brand_in_domain",
-                    "risky_tld","shortened","ip_flag","puny",
-                    "leet_in_domain","leet_brand_score",
-                    "brand_hyphen_suspicious","susp_ext",
-                    "suspicious_port","has_redirect",
-                    "double_slash_in_path","abnormal_subdomain",
+                    "brand_mismatch", "sus_words", "brand_in_domain",
+                    "risky_tld", "shortened", "ip_flag", "puny",
+                    "leet_in_domain", "leet_brand_score",
+                    "brand_hyphen_suspicious", "susp_ext",
+                    "suspicious_port", "has_redirect",
+                    "double_slash_in_path", "abnormal_subdomain",
                     "http_no_brand_no_age",
                 ]
                 if all(raw[_FEAT_IDX.get(f, -1)] == 0.0 for f in other_flags):
                     proba *= 0.55
 
-            # FIX 7: domain age adjustment (non-leet URLs only)
+            # FIX 7: domain age adjustment (non-override URLs only)
             domain = self._registered_domain(url)
             proba, age_note = adjust_confidence_by_domain_age(proba, domain)
 
@@ -941,10 +904,7 @@ class URLClassifier:
         resolved_url = None
         unshortened  = None
 
-        # ── Layer 0: FIX 11 Smart Whitelist ──────────────────────────────────
-        # Old: self._registered_domain(url) in WHITELIST
-        #   → missed legit subdomains (mail.google.com)
-        # New: _is_safe_whitelist_url() handles subdomains correctly
+        # Layer 0: Smart Whitelist (FIX 11)
         if _is_safe_whitelist_url(url):
             return {
                 "url"       : original_url,
@@ -954,7 +914,7 @@ class URLClassifier:
                 "source"    : "whitelist",
             }
 
-        # ── Layer 1: Google Safe Browsing ─────────────────────────────────────
+        # Layer 1: Google Safe Browsing
         is_mal, threat_type = check_google_safe_browsing(url)
         if is_mal:
             return {
@@ -997,7 +957,7 @@ class URLClassifier:
                     }
                 url = final_url
 
-        # ── Layer 2: ML Model ─────────────────────────────────────────────────
+        # Layer 2: ML Model
         brand_name, real_domain = detect_brand(url)
         result        = self._classify(url)
         result["url"] = original_url
@@ -1047,8 +1007,8 @@ class URLClassifier:
             fv        = self._feature_vector(classify_url)
 
             exp = explainer.explain_instance(
-                data_row   = fv,
-                predict_fn = self._lime_predict_fn,
+                data_row     = fv,
+                predict_fn   = self._lime_predict_fn,
                 num_features = num_features,
                 top_labels   = 1,
             )
@@ -1069,7 +1029,6 @@ class URLClassifier:
                 })
 
                 if weight > 0:
-                    # FIX 2: skip https_flag if site actually has HTTPS
                     if feat_name == "https_flag":
                         if raw_heuristic[_FEAT_IDX.get("https_flag", -1)] == 1.0:
                             continue
@@ -1091,7 +1050,6 @@ class URLClassifier:
                     )
                 )
 
-            # Add domain age reason if very new domain
             if 0 <= age_days < 30:
                 age_reason = (
                     f"This domain was registered only {age_days} days ago — "
