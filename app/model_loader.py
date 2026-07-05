@@ -914,7 +914,7 @@ class URLClassifier:
                 "source"    : "whitelist",
             }
 
-        # Layer 1: Google Safe Browsing
+    # Layer 1: Google Safe Browsing
         is_mal, threat_type = check_google_safe_browsing(url)
         if is_mal:
             return {
@@ -925,6 +925,20 @@ class URLClassifier:
                 "source"     : "google_safe_browsing",
                 "threat_type": threat_type,
             }
+
+        # FIX 14 MOVED HERE: raw IP + no HTTPS → MALICIOUS before reverse DNS
+        # Problem: reverse DNS resolves IP to hostname first, then ip_flag=0
+        # so FIX 14 inside _classify() never fired on the resolved URL
+        if _extract_ip(url) and not url.startswith("https"):
+            return {
+                "url"        : original_url,
+                "prediction" : "MALICIOUS",
+                "confidence" : 85.0,
+                "threshold"  : round(self.threshold * 100, 2),
+                "source"     : "model",
+                "domain_age" : "skipped_ip",
+            }
+
 
         # Reverse DNS for IP URLs
         ip = _extract_ip(url)
