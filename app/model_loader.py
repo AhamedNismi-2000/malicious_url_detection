@@ -164,6 +164,7 @@ TRUSTED_SUBDOMAIN_PREFIXES: set[str] = {
     "en", "us", "uk", "au", "ca", "in", "de", "fr",
     "cloud", "aws", "azure",
     "v1", "v2", "v3",
+    
 }
 
 
@@ -258,9 +259,26 @@ def _is_safe_whitelist_url(url: str) -> bool:
         registered = ext.registered_domain or ""
         subdomain  = (ext.subdomain or "").strip()
 
+        # Step 1: academic/government TLDs — trust all subdomains
+        _SAFE_TLDS = {
+            "ac.lk", "edu.lk", "gov.lk",
+            "ac.uk", "gov.uk",
+            "edu.au", "gov.au", "ac.nz",
+            "edu", "gov", "mil",
+            "ac.in", "edu.in",
+            "ac.jp", "ac.kr",
+        }
+        is_safe_tld = any(
+            registered.endswith("." + tld) or registered == tld
+            for tld in _SAFE_TLDS
+        )
+        if is_safe_tld:
+            return True
+
         if registered not in WHITELIST:
             return False
 
+        # Step 2: no subdomain at all → clean root domain → safe
         if not subdomain:
             return True
 
