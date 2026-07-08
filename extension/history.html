@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Detector — History</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg     : #0f1117;
+      --surface: #1a1d27;
+      --border : #2a2d3a;
+      --text   : #e2e4ec;
+      --muted  : #6b7280;
+      --mal    : #ef4444;
+      --ben    : #22c55e;
+      --accent : #818cf8;
+      --amber  : #f59e0b;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header-icon { font-size: 22px; }
+    .header-title { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+    .header-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .header-actions { margin-left: auto; display: flex; gap: 10px; }
+
+    .btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: filter 0.15s;
+    }
+    .btn:hover { filter: brightness(1.15); }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-danger { background: #7f1d1d; color: var(--mal); border: 1px solid var(--mal); }
+    .btn-outline {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-outline:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ── Stats cards ── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 24px 32px 0;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .stat-value.total   { color: var(--accent); }
+    .stat-value.mal     { color: var(--mal); }
+    .stat-value.ben     { color: var(--ben); }
+    .stat-value.rate    { color: var(--amber); }
+
+    /* Donut chart */
+    .donut-wrap {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 20px 32px 0;
+    }
+    .donut-canvas { flex-shrink: 0; }
+    .donut-legend { display: flex; flex-direction: column; gap: 8px; }
+    .legend-item  { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .legend-dot   { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* ── Filters ── */
+    .filters {
+      padding: 20px 32px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .filter-label { font-size: 11px; color: var(--muted); }
+    .filter-btn {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      transition: all 0.15s;
+    }
+    .filter-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .search-input {
+      margin-left: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 12px;
+      padding: 6px 10px;
+      outline: none;
+      width: 220px;
+    }
+    .search-input:focus { border-color: var(--accent); }
+
+    /* ── Table ── */
+    .table-wrap {
+      padding: 0 32px 32px;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      text-align: left;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky;
+      top: 57px;
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: rgba(129,140,248,0.05); }
+    tbody td {
+      padding: 10px 12px;
+      vertical-align: middle;
+    }
+
+    .verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .verdict-badge.mal {
+      background: rgba(239,68,68,0.15);
+      color: var(--mal);
+    }
+    .verdict-badge.ben {
+      background: rgba(34,197,94,0.12);
+      color: var(--ben);
+    }
+
+    .url-cell {
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-family: "Courier New", monospace;
+      color: var(--text);
+    }
+    .url-cell a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .url-cell a:hover { color: var(--accent); }
+
+    .conf-cell { color: var(--muted); font-size: 12px; }
+    .src-badge {
+      background: var(--border);
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--muted);
+    }
+    .time-cell { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--muted);
+    }
+    .empty-state .big { font-size: 40px; margin-bottom: 10px; }
+
+    .loading {
+      text-align: center;
+      padding: 48px;
+      color: var(--muted);
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <span class="header-icon">🛡</span>
+  <div>
+    <div class="header-title">URL Detection History</div>
+    <div class="header-sub">All URLs checked by the ML detector</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-outline" onclick="loadData()">↻ Refresh</button>
+    <button class="btn btn-danger" onclick="clearHistory()">🗑 Clear History</button>
+  </div>
+</div>
+
+<!-- Stats cards -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">Total Checked</div>
+    <div class="stat-value total" id="stat-total">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Malicious</div>
+    <div class="stat-value mal" id="stat-mal">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Benign</div>
+    <div class="stat-value ben" id="stat-ben">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Detection Rate</div>
+    <div class="stat-value rate" id="stat-rate">—</div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+  <span class="filter-label">Filter:</span>
+  <button class="filter-btn active" data-filter="all"       onclick="setFilter('all',       this)">All</button>
+  <button class="filter-btn"        data-filter="malicious" onclick="setFilter('malicious', this)">⚠ Malicious</button>
+  <button class="filter-btn"        data-filter="benign"    onclick="setFilter('benign',    this)">✓ Benign</button>
+  <input  class="search-input" id="search-input" type="text"
+          placeholder="Search URLs…" oninput="applySearch()" />
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+  <div id="table-container">
+    <div class="loading">
+      <div class="spinner"></div>
+      Loading history…
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = "http://localhost:5000";
+  let _allHistory = [];
+  let _filter     = "all";
+
+  async function loadData() {
+    try {
+      // Load stats
+      const statsRes = await fetch(`${API}/stats`);
+      const stats    = await statsRes.json();
+      document.getElementById("stat-total").textContent = stats.total    ?? 0;
+      document.getElementById("stat-mal"  ).textContent = stats.malicious ?? 0;
+      document.getElementById("stat-ben"  ).textContent = stats.benign    ?? 0;
+      document.getElementById("stat-rate" ).textContent = (stats.mal_rate ?? 0).toFixed(1) + "%";
+
+      // Load history
+      const histRes = await fetch(`${API}/history?limit=1000`);
+      const hist    = await histRes.json();
+      _allHistory   = hist.history || [];
+      renderTable(_allHistory);
+
+    } catch (err) {
+      document.getElementById("table-container").innerHTML = `
+        <div class="empty-state">
+          <div class="big">⚠</div>
+          <div>Cannot reach Flask API at ${API}</div>
+          <div style="margin-top:8px;font-size:11px;">Make sure <code>python app/app.py</code> is running</div>
+        </div>`;
+    }
+  }
+
+  function setFilter(filter, btn) {
+    _filter = filter;
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    applySearch();
+  }
+
+  function applySearch() {
+    const query = (document.getElementById("search-input").value || "").toLowerCase();
+    let data    = _allHistory;
+
+    if (_filter === "malicious") data = data.filter(h => h.prediction === "MALICIOUS");
+    if (_filter === "benign")    data = data.filter(h => h.prediction === "BENIGN");
+    if (query) data = data.filter(h => h.url.toLowerCase().includes(query));
+
+    renderTable(data);
+  }
+
+  function renderTable(history) {
+    const container = document.getElementById("table-container");
+
+    if (!history || history.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="big">🔍</div>
+          <div>No URLs found</div>
+          <div style="margin-top:6px;font-size:11px;color:var(--muted)">
+            Browse some websites and results will appear here
+          </div>
+        </div>`;
+      return;
+    }
+
+    const rows = history.map((h, i) => {
+      const isMal  = h.prediction === "MALICIOUS";
+      const vc     = isMal ? "mal" : "ben";
+      const icon   = isMal ? "⚠" : "✓";
+      const conf   = h.source === "whitelist"
+        ? "—"
+        : (h.confidence ?? 0).toFixed(1) + "%";
+      const brand  = h.brand ? `<span style="color:var(--amber);font-size:11px;">🎭 ${escapeHtml(h.brand)}</span>` : "";
+
+      return `
+        <tr>
+          <td style="color:var(--muted);font-size:11px;">${i + 1}</td>
+          <td>
+            <span class="verdict-badge ${vc}">${icon} ${h.prediction}</span>
+          </td>
+          <td class="url-cell">
+            <div>${escapeHtml(h.url)}</div>
+            ${brand}
+          </td>
+          <td class="conf-cell">${conf}</td>
+          <td><span class="src-badge">${h.source || "model"}</span></td>
+          <td class="time-cell">${h.timestamp || "—"}</td>
+        </tr>`;
+    }).join("");
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Verdict</th>
+            <th>URL</th>
+            <th>Confidence</th>
+            <th>Source</th>
+            <th>Time (UTC)</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  async function clearHistory() {
+    const confirmed = confirm("Clear all URL history and statistics?\nThis cannot be undone.");
+    if (!confirmed) return;
+    try {
+      await fetch(`${API}/stats/clear`, { method: "POST" });
+      _allHistory = [];
+      document.getElementById("stat-total").textContent = "0";
+      document.getElementById("stat-mal"  ).textContent = "0";
+      document.getElementById("stat-ben"  ).textContent = "0";
+      document.getElementById("stat-rate" ).textContent = "0%";
+      renderTable([]);
+    } catch (_) {
+      alert("Failed to clear — is Flask running?");
+    }
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // Load on startup
+  loadData();
+</script>
+</body>
+</html>
