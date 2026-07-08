@@ -41,14 +41,15 @@
     }
     .header-title { font-weight: 600; font-size: 14px; letter-spacing: .3px; }
     .header-sub   { font-size: 10px; color: var(--c-muted); margin-top: 1px; }
-    .settings-btn {
-      margin-left: auto;
+    .header-right  { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+    .icon-btn {
       background: none; border: none; cursor: pointer;
       color: var(--c-muted); padding: 2px;
       border-radius: 4px; line-height: 0;
       transition: color .15s;
     }
-    .settings-btn:hover { color: var(--c-text); }
+    .icon-btn:hover { color: var(--c-text); }
 
     /* Card */
     .card {
@@ -129,7 +130,7 @@
     }
 
     /* Explanation */
-    .explain-section { margin: 0 12px 12px; }
+    .explain-section { margin: 0 12px 10px; }
     .explain-title {
       font-size: 11px; font-weight: 600; color: var(--c-muted);
       text-transform: uppercase; letter-spacing: .6px;
@@ -154,6 +155,29 @@
     .reason-dot.mal { background: var(--c-mal-dim); color: var(--c-mal); }
     .reason-dot.ben { background: var(--c-ben-dim); color: var(--c-ben); }
     .reason-text { font-size: 12px; line-height: 1.5; color: var(--c-text); }
+
+    /* More Details button */
+    .details-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin: 0 12px 12px;
+      padding: 8px;
+      background: transparent;
+      border: 1px solid var(--c-border);
+      border-radius: var(--radius);
+      color: var(--c-muted);
+      font-size: 12px;
+      cursor: pointer;
+      width: calc(100% - 24px);
+      transition: all 0.15s;
+    }
+    .details-btn:hover {
+      color: var(--c-accent);
+      border-color: var(--c-accent);
+      background: rgba(129,140,248,0.05);
+    }
 
     /* Loading + error */
     .state-msg {
@@ -233,13 +257,24 @@
     <div class="header-title">URL Detector</div>
     <div class="header-sub">ML-powered malicious URL detection</div>
   </div>
-  <button class="settings-btn" id="settings-toggle" title="Settings">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-    </svg>
-  </button>
+  <div class="header-right">
+    <!-- History button -->
+    <button class="icon-btn" id="history-btn" title="View History">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </button>
+    <!-- Settings button -->
+    <button class="icon-btn" id="settings-toggle" title="Settings">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </div>
 </div>
 
 <!-- Main result card -->
@@ -252,6 +287,17 @@
 
 <!-- Explanation -->
 <div id="explain-content"></div>
+
+<!-- More Details button (shown after result loads) -->
+<button class="details-btn" id="details-btn" style="display:none;"
+        onclick="openHistory()">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+  View History &amp; Statistics
+</button>
 
 <!-- Settings -->
 <div id="settings-panel">
