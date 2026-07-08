@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>⚠ Dangerous Site Blocked</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --red     : #ef4444;
+      --red-dark: #7f1d1d;
+      --red-dim : rgba(239,68,68,0.12);
+      --bg      : #0a0a0f;
+      --surface : #111118;
+      --border  : #1f2028;
+      --text    : #f1f1f3;
+      --muted   : #6b7280;
+      --amber   : #f59e0b;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    /* Pulsing warning circle */
+    .icon-wrap {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      margin-bottom: 28px;
+    }
+    .icon-pulse {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: rgba(239,68,68,0.15);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .icon-pulse2 {
+      position: absolute;
+      inset: 10px;
+      border-radius: 50%;
+      background: rgba(239,68,68,0.2);
+      animation: pulse 2s ease-in-out infinite 0.3s;
+    }
+    .icon-circle {
+      position: absolute;
+      inset: 20px;
+      border-radius: 50%;
+      background: var(--red-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1);   opacity: 1; }
+      50%       { transform: scale(1.1); opacity: 0.6; }
+    }
+
+    /* Main card */
+    .card {
+      background: var(--surface);
+      border: 1px solid #2a1515;
+      border-top: 3px solid var(--red);
+      border-radius: 12px;
+      max-width: 640px;
+      width: 100%;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--red);
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    /* Confidence bar */
+    .conf-box {
+      background: var(--red-dim);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .conf-pct {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--red);
+      white-space: nowrap;
+    }
+    .conf-right { flex: 1; }
+    .conf-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .bar-track {
+      height: 6px;
+      background: rgba(239,68,68,0.15);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: var(--red);
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+
+    /* Brand warning */
+    .brand-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(245,158,11,0.1);
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+    .brand-icon { font-size: 18px; }
+    .brand-real { font-weight: 700; color: var(--amber); }
+
+    /* URL box */
+    .url-box {
+      background: #0d0d14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+    }
+    .url-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 5px;
+    }
+    .url-text {
+      font-size: 12px;
+      color: var(--red);
+      word-break: break-all;
+      font-family: "Courier New", monospace;
+    }
+
+    /* Reasons */
+    .reasons-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
+    }
+    .reason-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .reason-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: #0d0d14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .reason-num {
+      width: 20px;
+      height: 20px;
+      background: var(--red-dark);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--red);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .reason-text {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+
+    /* Action buttons */
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .btn-back {
+      flex: 1;
+      min-width: 140px;
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 13px 20px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: filter 0.15s;
+    }
+    .btn-back:hover { filter: brightness(1.15); }
+
+    .btn-proceed {
+      flex: 1;
+      min-width: 140px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 13px 20px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-proceed:hover {
+      color: var(--text);
+      border-color: var(--muted);
+    }
+
+    .footer-note {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Pulsing warning icon -->
+  <div class="icon-wrap">
+    <div class="icon-pulse"></div>
+    <div class="icon-pulse2"></div>
+    <div class="icon-circle">⚠</div>
+  </div>
+
+  <div class="card">
+    <h1>Dangerous Site Blocked</h1>
+    <p class="subtitle">Our ML model detected this URL as malicious and blocked it to protect you.</p>
+
+    <!-- Confidence -->
+    <div class="conf-box">
+      <div class="conf-pct" id="conf-pct">—%</div>
+      <div class="conf-right">
+        <div class="conf-label">Malicious confidence score</div>
+        <div class="bar-track">
+          <div class="bar-fill" id="conf-bar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Brand warning (shown if brand impersonation detected) -->
+    <div class="brand-box" id="brand-box" style="display:none;">
+      <span class="brand-icon">🎭</span>
+      <span>
+        This site is impersonating <span class="brand-real" id="brand-name"></span>.
+        The real website is <span class="brand-real" id="brand-real"></span>
+      </span>
+    </div>
+
+    <!-- URL -->
+    <div class="url-box">
+      <div class="url-label">Blocked URL</div>
+      <div class="url-text" id="blocked-url">—</div>
+    </div>
+
+    <!-- Reasons -->
+    <div id="reasons-section" style="display:none;">
+      <div class="reasons-title">Why this was blocked</div>
+      <div class="reason-list" id="reason-list"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button class="btn-back" onclick="goBack()">
+        ← Take Me Back to Safety
+      </button>
+      <button class="btn-proceed" onclick="proceedAnyway()">
+        Proceed Anyway (Not Recommended)
+      </button>
+    </div>
+
+    <p class="footer-note">
+      Detected by Malicious URL Detector &nbsp;•&nbsp; ML-powered with LIME explanations
+    </p>
+  </div>
+
+  <script>
+    // Parse URL parameters
+    const params     = new URLSearchParams(window.location.search);
+    const blockedUrl = params.get("url")        || "";
+    const confidence = parseFloat(params.get("confidence") || "0");
+    const brand      = params.get("brand")      || "";
+    const realDomain = params.get("real")       || "";
+    const tabId      = parseInt(params.get("tabId") || "0");
+    let   reasons    = [];
+
+    try {
+      reasons = JSON.parse(params.get("reasons") || "[]");
+    } catch (_) {}
+
+    // Populate confidence
+    document.getElementById("conf-pct").textContent = confidence.toFixed(1) + "%";
+    setTimeout(() => {
+      document.getElementById("conf-bar").style.width = confidence + "%";
+    }, 100);
+
+    // Populate URL
+    document.getElementById("blocked-url").textContent = blockedUrl;
+
+    // Brand impersonation
+    if (brand) {
+      document.getElementById("brand-box").style.display = "flex";
+      document.getElementById("brand-name").textContent  = brand;
+      document.getElementById("brand-real").textContent  = realDomain || brand + ".com";
+    }
+
+    // Reasons
+    if (reasons.length > 0) {
+      document.getElementById("reasons-section").style.display = "block";
+      const list = document.getElementById("reason-list");
+      reasons.forEach((r, i) => {
+        const item = document.createElement("div");
+        item.className = "reason-item";
+        item.innerHTML = `
+          <div class="reason-num">${i + 1}</div>
+          <div class="reason-text">${escapeHtml(r)}</div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function goBack() {
+      // Try to go back in history, or close tab if no history
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    }
+
+    function proceedAnyway() {
+      if (!blockedUrl) return;
+      // Confirm before proceeding
+      const confirmed = confirm(
+        "⚠ WARNING\n\n" +
+        "This site was classified as MALICIOUS with " + confidence.toFixed(1) + "% confidence.\n\n" +
+        "Proceeding may expose you to phishing, malware, or data theft.\n\n" +
+        "Are you sure you want to continue?"
+      );
+      if (!confirmed) return;
+
+      // Tell background to bypass and navigate
+      chrome.runtime.sendMessage({
+        type : "PROCEED_ANYWAY",
+        tabId: tabId,
+        url  : blockedUrl,
+      });
+    }
+  </script>
+</body>
+</html>
