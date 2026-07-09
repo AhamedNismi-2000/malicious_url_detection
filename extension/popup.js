@@ -1,11 +1,10 @@
 /**
  * popup.js — Renders prediction + cached natural language reasons.
- * Reasons are fetched by background.js and cached in session storage,
- * so they appear instantly when popup opens — no waiting for LIME.
  *
- * NEW:
- *   - History button in header → opens history.html in new tab
- *   - "View History & Statistics" button → opens history.html in new tab
+ * FIXES:
+ *   - History button uses chrome.runtime.getURL directly (no message needed)
+ *   - Details button always visible after result loads
+ *   - Handles blocked.html and history.html gracefully
  */
 
 "use strict";
@@ -40,11 +39,11 @@ async function callExplain(url, apiBase) {
   return res.json();
 }
 
-// ── Open history page ─────────────────────────────────────────────────────────
-
+// ── Open history in new tab ───────────────────────────────────────────────────
 function openHistory() {
-  const historyUrl = chrome.runtime.getURL("history.html");
-  chrome.tabs.create({ url: historyUrl });
+  const url = chrome.runtime.getURL("history.html");
+  chrome.tabs.create({ url });
+  window.close(); // close popup
 }
 
 // ── Render helpers ────────────────────────────────────────────────────────────
@@ -69,10 +68,10 @@ function renderCard(result) {
     : result.url || "—";
 
   let subtitle = "ML model classification";
-  if (result.source === "whitelist")            subtitle = "Trusted domain — whitelist";
+  if (result.source === "whitelist")                 subtitle = "Trusted domain — whitelist";
   else if (result.source === "google_safe_browsing") subtitle = "Flagged by Google Safe Browsing";
-  else if (result.source === "error")           subtitle = "API unreachable";
-  else if (result.brand_detected)               subtitle = `Impersonating ${result.brand_detected}`;
+  else if (result.source === "error")                subtitle = "API unreachable";
+  else if (result.brand_detected)                    subtitle = `Impersonating ${result.brand_detected}`;
 
   document.getElementById("main-content").innerHTML = `
     <div class="card ${vc}">
@@ -123,7 +122,7 @@ function renderCard(result) {
       `threshold ${result.threshold}%`;
   }
 
-  // Show "View History" button
+  // Show details button
   document.getElementById("details-btn").style.display = "flex";
 }
 
@@ -169,7 +168,8 @@ function renderError(msg) {
   document.getElementById("main-content").innerHTML = `
     <div class="state-msg">⚠ ${escapeHtml(msg)}</div>`;
   document.getElementById("explain-content").innerHTML = "";
-  document.getElementById("details-btn").style.display = "none";
+  // Still show details button so user can check history
+  document.getElementById("details-btn").style.display = "flex";
 }
 
 function escapeHtml(str) {
@@ -187,12 +187,18 @@ async function run() {
   const url   = tab?.url;
 
   if (!url || (!url.startsWith("http://") && !url.startsWith("https://"))) {
-    renderError("Not a web page — nothing to check.");
+    document.getElementById("main-content").innerHTML = `
+      <div class="state-msg">
+        <div style="font-size:28px;margin-bottom:8px;">🛡</div>
+        Open a website to check it
+      </div>`;
+    document.getElementById("details-btn").style.display = "flex";
     return;
   }
 
-  // Don't show result for our own pages
-  if (url.includes("blocked.html") || url.includes("history.html")) {
+  // Don't try to classify our own pages
+  const ownPages = ["blocked.html", "history.html"];
+  if (ownPages.some(p => url.includes(p))) {
     document.getElementById("main-content").innerHTML = `
       <div class="state-msg">
         <div style="font-size:28px;margin-bottom:8px;">🛡</div>
@@ -211,10 +217,8 @@ async function run() {
     cached = store[`tab_${tab.id}`];
   } catch (_) {}
 
-  // Use cache if it matches current URL
   if (cached && cached.url === url) {
     renderCard(cached);
-
     if (cached.prediction === "MALICIOUS") {
       if (cached.reasons && cached.reasons.length > 0) {
         renderReasons(cached.reasons, cached.prediction);
@@ -232,7 +236,9 @@ async function run() {
     prediction     = await callPredict(url, apiBase);
     prediction.url = url;
   } catch (err) {
-    renderError(`Could not reach API at ${apiBase}.\nMake sure Flask is running.`);
+    renderError(
+      `Could not reach API at ${apiBase}.\nMake sure Flask is running.\n\n${err.message}`
+    );
     return;
   }
 
@@ -257,7 +263,7 @@ async function fetchAndRenderReasons(url, apiBase, prediction) {
 
     renderReasons(reasons, prediction.prediction);
 
-    // Update cache with reasons
+    // Update session cache
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const store = await chrome.storage.session.get(`tab_${tab.id}`);
@@ -301,9 +307,10 @@ document.getElementById("save-settings").addEventListener("click", () => {
   });
 });
 
-// ── History button in header ──────────────────────────────────────────────────
+// ── History / Details buttons ─────────────────────────────────────────────────
 
 document.getElementById("history-btn").addEventListener("click", openHistory);
+document.getElementById("details-btn").addEventListener("click", openHistory);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 run();
