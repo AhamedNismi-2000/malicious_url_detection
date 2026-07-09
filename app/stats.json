@@ -1,0 +1,81 @@
+{
+  "total": 10,
+  "malicious": 6,
+  "benign": 4,
+  "history": [
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-08 05:52:14"
+    },
+    {
+      "url": "http://g00gle.com/",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-08 05:51:45",
+      "brand": "Google"
+    },
+    {
+      "url": "http://g00gle.com/",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-08 05:51:28",
+      "brand": "Google"
+    },
+    {
+      "url": "http://g00gle.com/",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-08 05:50:56",
+      "brand": "Google"
+    },
+    {
+      "url": "http://g00gle.com/",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-08 05:49:12",
+      "brand": "Google"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-08 05:48:43"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-08 05:48:42"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "MALICIOUS",
+      "confidence": 83.1,
+      "source": "model",
+      "timestamp": "2026-07-08 05:47:27"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "MALICIOUS",
+      "confidence": 83.1,
+      "source": "model",
+      "timestamp": "2026-07-08 05:47:25"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-08 05:46:50"
+    }
+  ]
+}

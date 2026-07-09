@@ -193,14 +193,20 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "PROCEED_ANYWAY") {
-    const { tabId, url } = message;
-    // Add to bypass list temporarily
+    const { url } = message;
+    // Use sender's tab ID — more reliable than passing tabId through URL params
+    const tabId = sender.tab ? sender.tab.id : null;
+    // Add to bypass list so webNavigation listener skips this URL
     _pendingChecks.add(url);
-    chrome.tabs.update(tabId, { url }, () => {
-      // Remove from bypass after a short delay
-      setTimeout(() => _pendingChecks.delete(url), 3000);
-    });
+    if (tabId) {
+      chrome.tabs.update(tabId, { url }, () => {
+        setTimeout(() => _pendingChecks.delete(url), 5000);
+      });
+    } else {
+      setTimeout(() => _pendingChecks.delete(url), 5000);
+    }
     sendResponse({ ok: true });
+    return true;
   }
 
   if (message.type === "GET_HISTORY_URL") {
