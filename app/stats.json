@@ -1,8 +1,403 @@
 {
-  "total": 10,
-  "malicious": 6,
-  "benign": 4,
+  "total": 66,
+  "malicious": 11,
+  "benign": 55,
   "history": [
+    {
+      "url": "https://trailhead.salesforce.com/",
+      "prediction": "BENIGN",
+      "confidence": 24.3,
+      "source": "model",
+      "timestamp": "2026-07-10 15:00:52"
+    },
+    {
+      "url": "https://playful-otter-r3zu4w-dev-ed.trailblaze.my.salesforce.com/?ec=302&startURL=%2Fvisualforce%2Fsession%3Furl%3Dhttps%253A%252F%252Fplayful-otter-r3zu4w-dev-ed.trailblaze.my.salesforce-setup.com%252Flightning%252Fsetup%252FObjectManager%252Fhome",
+      "prediction": "BENIGN",
+      "confidence": 27.2,
+      "source": "model",
+      "timestamp": "2026-07-10 15:00:45"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:41"
+    },
+    {
+      "url": "https://manage.wix.com/dashboard/932506d0-9a48-4acf-9865-9b0e2c892b57/wix-portfolio/ai-cluster",
+      "prediction": "BENIGN",
+      "confidence": 24.8,
+      "source": "model",
+      "timestamp": "2026-07-10 15:00:36"
+    },
+    {
+      "url": "https://chatgpt.com/c/6a4a7688-3d78-83ee-b37c-4e35c93977e9?mweb_fallback=1",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:36"
+    },
+    {
+      "url": "https://www.canva.com/dream-lab",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:36"
+    },
+    {
+      "url": "https://github.com/AhamedNismi-2000",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:34"
+    },
+    {
+      "url": "https://web.whatsapp.com/",
+      "prediction": "BENIGN",
+      "confidence": 25.2,
+      "source": "model",
+      "timestamp": "2026-07-10 15:00:32"
+    },
+    {
+      "url": "https://chat.deepseek.com/a/chat/s/69d4d833-4578-4a44-8188-73baa62cbf40",
+      "prediction": "BENIGN",
+      "confidence": 27.6,
+      "source": "model",
+      "timestamp": "2026-07-10 15:00:32"
+    },
+    {
+      "url": "https://www.udemy.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:31"
+    },
+    {
+      "url": "https://claude.ai/chat/c2c4d466-8432-40f6-bbe9-8f0fd306e712",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:31"
+    },
+    {
+      "url": "https://leetcode.com/problems/find-invalid-ip-addresses/submissions/2053706110/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:30"
+    },
+    {
+      "url": "https://www.overleaf.com/project/6a1d239c55dbf4df1cd5e021",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:26"
+    },
+    {
+      "url": "https://vle.uwu.ac.lk/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 15:00:26"
+    },
+    {
+      "url": "https://www.afternic.com/forsale/evil.xyz?utm_source=TDFS_DASLNC&utm_medium=p%E2%80%A6",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:49:48"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:49:30"
+    },
+    {
+      "url": "http://127.0.0.1:57455/signin?nonce=pC4y0T1CT4RF9VyrsbVe0A==",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-10 14:49:29"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:49:18"
+    },
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:49:15"
+    },
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:49:01"
+    },
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:48:22"
+    },
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:48:16"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:48:01"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:47:35"
+    },
+    {
+      "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-10 14:47:34"
+    },
+    {
+      "url": "https://exam.uwu.ac.lk/ug/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:18:35"
+    },
+    {
+      "url": "https://www.google.com/search?q=uwu+exam+portal&sca_esv=f3ea53565e54e9f4&sxsrf=APpeQnt72Bh7Y0GSEUahH6qxsaGU4F12OQ%3A1783577854349&source=hp&ei=_jxPapfqEdKgseMPsJ7TsQ0&iflsig=ABILxe8AAAAAak9LDgAvcLAtZ6BK_lHaVwGfVf7jX8pS&oq=uwu+exam&gs_lp=Egdnd3Mtd2l6Igh1d3UgZXhhbSoCCAAyBBAjGCcyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIIEAAYgAQYywEyCBAAGIAEGMsBMggQABiABBjLATILEAAYgAQYigUYhgNIrRtQAFisEXAAeACQAQCYAfUBoAGlDKoBBTAuNS4zuAEDyAEA-AEBmAIIoALFDMICChAuGEMYgAQYigXCAgoQABiABBiKBRhDwgIIEAAYgAQYsQPCAg4QLhiABBixAxjHARjRA8ICDhAAGIAEGIoFGLEDGIMBwgILEC4YgAQYigUYsQPCAgsQLhiDARixAxiABMICBRAuGIAEwgIKEC4YgAQYFBiHApgDAOIDBRIBMSBAkgcFMC41LjOgB4REsgcFMC41LjO4B8UMwgcFMC43LjHIBxeACAE&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:18:34"
+    },
+    {
+      "url": "https://vle.uwu.ac.lk/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:18:18"
+    },
+    {
+      "url": "https://www.google.com/search?q=ueu+vle+&sca_esv=f3ea53565e54e9f4&sxsrf=APpeQnvgcG6dFyknC3owIRN4F8cSkhb42w%3A1783577893394&source=hp&ei=JT1PaoDiFcjWseMPnZOCsAs&iflsig=ABILxe8AAAAAak9LNUyYX9bXavG0FMtpgq60HGFczmMa&ved=0ahUKEwjAiI22-cSVAxVIa2wGHZ2JALYQ4dUDCCg&uact=5&oq=ueu+vle+&gs_lp=Egdnd3Mtd2l6Igh1ZXUgdmxlIDIHECMYsAIYJzIGEAAYHhgNMggQABgIGB4YDTILEAAYgAQYigUYhgMyCBAAGIAEGKIEMgUQABjvBTIIEAAYgAQYogRIhgpQAFjECHAAeACQAQCYAaUCoAGoDaoBBTAuMy41uAEDyAEA-AEBmAIIoALLDcICBBAjGCfCAggQABiABBixA8ICDhAuGIAEGLEDGMcBGNEDwgIFEAAYgATCAg4QABiABBiKBRixAxiDAcICCxAAGIAEGLEDGIMBwgIIEC4YsQMYgATCAgsQLhiABBixAxiDAcICBBAAGAPCAgUQLhiABMICDBAAGIAEGAoYCxixA8ICDBAuGAoYCxixAxiABMICCRAAGIAEGAoYC8ICEBAAGIAEGIoFGAoYsQMYgwHCAgwQLhiABBgKGAsYsQPCAg8QLhiABBgKGAsYxwEYrwHCAgkQLhgKGAsYgATCAgsQABiABBgKGAsYKsICBhAAGBYYHpgDAJIHBzAuMy40LjGgB6VKsgcHMC4zLjQuMbgHyw3CBwUwLjYuMsgHF4AIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:18:17"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:18:13"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:17:36"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:17:34"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:16:48"
+    },
+    {
+      "url": "http://faceb00k.gq/checkpoint",
+      "prediction": "MALICIOUS",
+      "confidence": 95.5,
+      "source": "model",
+      "timestamp": "2026-07-09 06:15:29",
+      "brand": "Facebook"
+    },
+    {
+      "url": "http://g00gle.com/login",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-09 06:15:22",
+      "brand": "Google"
+    },
+    {
+      "url": "http://xn--pypal-4ve.com/signin",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-09 06:13:57"
+    },
+    {
+      "url": "https://www.amazon.co.uk/dp/B08N5WRWNW?ref=ppx_yo_dt_b_asin_title",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:13:47"
+    },
+    {
+      "url": "https://playful-otter-r3zu4w-dev-ed.trailblaze.my.salesforce.com/?ec=302&startURL=%2Fvisualforce%2Fsession%3Furl%3Dhttps%253A%252F%252Fplayful-otter-r3zu4w-dev-ed.trailblaze.my.salesforce-setup.com%252Flightning%252Fsetup%252FObjectManager%252Fhome",
+      "prediction": "BENIGN",
+      "confidence": 27.2,
+      "source": "model",
+      "timestamp": "2026-07-09 06:13:41"
+    },
+    {
+      "url": "http://xn--pypal-4ve.com/signin",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-09 06:13:05"
+    },
+    {
+      "url": "https://xn--googl-fsa.com/",
+      "prediction": "BENIGN",
+      "confidence": 13.7,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:58"
+    },
+    {
+      "url": "https://q1.quotes.com/38a7e032-7b5d-11f1-8aed-cd72e03bdbed",
+      "prediction": "BENIGN",
+      "confidence": 28.8,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:55"
+    },
+    {
+      "url": "http://q1.quotes.com/38a7e032-7b5d-11f1-8aed-cd72e03bdbed",
+      "prediction": "BENIGN",
+      "confidence": 9.5,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:55"
+    },
+    {
+      "url": "http://xn--googl-fsa.com/",
+      "prediction": "BENIGN",
+      "confidence": 9.8,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:55"
+    },
+    {
+      "url": "https://xn--googl-fsa.com/?ch=1&js=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJKb2tlbiIsImV4cCI6MTc4MzU4NDc3MywiaWF0IjoxNzgzNTc3NTczLCJpc3MiOiJKb2tlbiIsImpzIjoxLCJqdGkiOiIzMzA4a21qajZvbGJ1dXZ1MGczdWZnOGsiLCJuYmYiOjE3ODM1Nzc1NzMsInRzIjoxNzgzNTc3NTczNTIzMjk0fQ.kuzxxUrwXlc-aKBgjGuf3oPJJYja1bXk6mkgNYx1Kdg&sid=144451c2-76bc-11f1-9870-c4cf58316bd6",
+      "prediction": "BENIGN",
+      "confidence": 25.3,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:55"
+    },
+    {
+      "url": "https://q1.quotes.com/327f6a4a-7b5d-11f1-a524-cd7235a05284",
+      "prediction": "BENIGN",
+      "confidence": 28.2,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:45"
+    },
+    {
+      "url": "http://q1.quotes.com/327f6a4a-7b5d-11f1-a524-cd7235a05284",
+      "prediction": "BENIGN",
+      "confidence": 11.4,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:45"
+    },
+    {
+      "url": "http://xn--googl-fsa.com/",
+      "prediction": "BENIGN",
+      "confidence": 9.8,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:45"
+    },
+    {
+      "url": "https://www.g0ogle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.4,
+      "source": "model",
+      "timestamp": "2026-07-09 06:12:04",
+      "brand": "Google"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:11:51"
+    },
+    {
+      "url": "https://www.gogle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.3,
+      "source": "model",
+      "timestamp": "2026-07-09 06:11:48"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:11:47"
+    },
+    {
+      "url": "https://www.gogle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.3,
+      "source": "model",
+      "timestamp": "2026-07-09 06:11:37"
+    },
+    {
+      "url": "https://www.gogle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.3,
+      "source": "model",
+      "timestamp": "2026-07-09 06:11:36"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:11:07"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:10:33"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-09 06:10:31"
+    },
     {
       "url": "https://claude.ai/chat/02aed04d-817c-42b2-9851-9de75e0c46a0",
       "prediction": "BENIGN",
