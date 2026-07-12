@@ -1,8 +1,114 @@
 {
-  "total": 66,
-  "malicious": 11,
-  "benign": 55,
+  "total": 80,
+  "malicious": 17,
+  "benign": 63,
   "history": [
+    {
+      "url": "http://1nstagram.cf/login",
+      "prediction": "MALICIOUS",
+      "confidence": 97.4,
+      "source": "model",
+      "timestamp": "2026-07-12 13:45:55",
+      "brand": "Instagram"
+    },
+    {
+      "url": "http://1nstagram.cf/login",
+      "prediction": "MALICIOUS",
+      "confidence": 97.4,
+      "source": "model",
+      "timestamp": "2026-07-12 13:45:36",
+      "brand": "Instagram"
+    },
+    {
+      "url": "http://g00gle.com/login",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-12 13:45:23",
+      "brand": "Google"
+    },
+    {
+      "url": "http://login.google.com.evil.xyz/lander",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-12 13:44:54",
+      "brand": "Google"
+    },
+    {
+      "url": "http://login.google.com.evil.xyz/steal",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-12 13:44:54",
+      "brand": "Google"
+    },
+    {
+      "url": "http://paypal.com.verify-now.net/login",
+      "prediction": "MALICIOUS",
+      "confidence": 86.7,
+      "source": "model",
+      "timestamp": "2026-07-12 13:44:12",
+      "brand": "PayPal"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:43:57"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQABiABDIHCAIQABiABDIHCAMQABiABDIHCAQQABiABDIHCAUQABiABDIGCAYQRRg8MgYIBxAuGEDSAQg0NDE2ajBqNKgCALACAQ&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:43:57"
+    },
+    {
+      "url": "https://www.go0gle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.2,
+      "source": "model",
+      "timestamp": "2026-07-12 13:43:46",
+      "brand": "Google"
+    },
+    {
+      "url": "https://www.go0gle.com/",
+      "prediction": "BENIGN",
+      "confidence": 23.2,
+      "source": "model",
+      "timestamp": "2026-07-12 13:43:39",
+      "brand": "Google"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:43:20"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:43:15"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:42:15"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:42:13"
+    },
     {
       "url": "https://trailhead.salesforce.com/",
       "prediction": "BENIGN",

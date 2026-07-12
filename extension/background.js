@@ -1,26 +1,21 @@
 /**
  * background.js — Service worker for the Malicious URL Detector extension.
  *
- * BLOCKING FLOW (new):
+ * BLOCKING FLOW:
  *   1. webNavigation.onBeforeNavigate fires BEFORE page loads
  *   2. Calls POST /predict immediately
  *   3. If MALICIOUS → redirect tab to blocked.html BEFORE the page loads
  *   4. If BENIGN    → allow navigation, fetch explanation in background
  *
- * HISTORY (new):
- *   Every URL checked is recorded via POST /predict which saves to stats.json
- *
- * POPUP FLOW (unchanged):
- *   Results cached in chrome.storage.session for instant popup display
+ * FIX: reasons passed to blocked.html via chrome.storage.session
+ *      (not URL params) to avoid URL length limits and encoding issues
  */
 
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
 
-// URLs currently being checked — prevent double-checking blocked.html itself
 const _pendingChecks = new Set();
-const _checkedUrls   = new Map(); // url → result cache (session)
 
 async function getApiBase() {
   return new Promise((resolve) =>
@@ -66,25 +61,19 @@ function setBadge(tabId, prediction) {
 function isClassifiable(url) {
   if (!url) return false;
   if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
-  // Don't check our own extension pages
-  if (url.includes("blocked.html") || url.includes("history.html")) return false;
-  // Don't check localhost (Flask API itself)
+  if (url.includes("blocked.html"))  return false;
+  if (url.includes("history.html"))  return false;
   if (url.startsWith("http://localhost")) return false;
   return true;
 }
 
-function showNotification(url, confidence, reasons, brandDetected) {
+function showNotification(confidence, reasons, brandDetected) {
   let message = `Confidence: ${confidence.toFixed(1)}%`;
   if (brandDetected) message = `Impersonating ${brandDetected} — ${message}`;
-
-  const topReasons  = (reasons || []).slice(0, 2);
-  const contextMsg  = topReasons.length > 0
-    ? topReasons.join(" • ")
-    : "Suspicious URL patterns detected";
-
+  const contextMsg = (reasons || []).slice(0, 2).join(" • ") || "Suspicious URL patterns detected";
   chrome.notifications.create({
     type             : "basic",
-    iconUrl          : "icons/icon128.png",
+    iconUrl          : "icons/icon.png",
     title            : "⚠ Malicious URL Blocked",
     message          : message,
     contextMessage   : contextMsg,
@@ -93,25 +82,11 @@ function showNotification(url, confidence, reasons, brandDetected) {
   });
 }
 
-function buildBlockedUrl(tabId, originalUrl, result) {
-  const params = new URLSearchParams({
-    url       : originalUrl,
-    confidence: result.confidence || 0,
-    source    : result.source || "model",
-    brand     : result.brand_detected || "",
-    real      : result.real_domain || "",
-    reasons   : JSON.stringify(result.reasons || []),
-    tabId     : tabId,
-  });
-  return chrome.runtime.getURL(`blocked.html?${params.toString()}`);
-}
-
 // ════════════════════════════════════════════════════════════════
-// MAIN BLOCKING LOGIC — fires BEFORE page loads
+// MAIN BLOCKING LOGIC
 // ════════════════════════════════════════════════════════════════
 
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  // Only main frame navigations (not iframes)
   if (details.frameId !== 0) return;
 
   const url   = details.url;
@@ -132,7 +107,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     setBadge(tabId, result.prediction);
 
     if (result.prediction === "MALICIOUS") {
-      // ── BLOCK: redirect to warning page BEFORE site loads ──
       let reasons       = result.reasons || [];
       let brandDetected = result.brand_detected || null;
 
@@ -145,28 +119,39 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
         result.brand_detected  = brandDetected;
         result.real_domain     = explained.real_domain || result.real_domain;
         result.explanation     = explained.explanation || [];
-        // Update cache with full result
         await chrome.storage.session.set({ [`tab_${tabId}`]: result });
       }
 
-      // Show notification
-      showNotification(url, result.confidence, reasons, brandDetected);
+      showNotification(result.confidence, reasons, brandDetected);
 
-      // Redirect to blocked page
-      const blockedUrl = buildBlockedUrl(tabId, url, result);
-      chrome.tabs.update(tabId, { url: blockedUrl });
+      // FIX: Store block data in session storage instead of URL params
+      // URL params have length limits and encoding issues with JSON
+      const blockKey = `block_${tabId}`;
+      await chrome.storage.session.set({
+        [blockKey]: {
+          url          : url,
+          confidence   : result.confidence,
+          source       : result.source || "model",
+          brand        : brandDetected || "",
+          real         : result.real_domain || "",
+          reasons      : reasons,
+        }
+      });
+
+      // Redirect to blocked page — just pass tabId so blocked.html can read storage
+      const blockedPageUrl = chrome.runtime.getURL(`blocked.html?tabId=${tabId}`);
+      chrome.tabs.update(tabId, { url: blockedPageUrl });
 
     } else {
-      // BENIGN — allow navigation, fetch explanation quietly
+      // BENIGN — fetch explanation quietly
       if (result.source === "model") {
         const explained = await getExplanation(url, api);
         if (explained) {
-          result.reasons    = explained.reasons || [];
+          result.reasons     = explained.reasons || [];
           result.explanation = explained.explanation || [];
           await chrome.storage.session.set({ [`tab_${tabId}`]: result });
         }
       }
-      // Send hide banner message (in case content.js is loaded)
       chrome.tabs.sendMessage(tabId, { type: "HIDE_BANNER" }).catch(() => {});
     }
 
@@ -175,11 +160,8 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     chrome.action.setBadgeBackgroundColor({ tabId, color: "#9E9E9E" });
     await chrome.storage.session.set({
       [`tab_${tabId}`]: {
-        url,
-        prediction: "UNKNOWN",
-        confidence: 0,
-        source    : "error",
-        error     : err.message,
+        url, prediction: "UNKNOWN", confidence: 0,
+        source: "error", error: err.message,
       },
     });
   } finally {
@@ -188,18 +170,18 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// HANDLE PROCEED ANYWAY MESSAGE from blocked.html
+// MESSAGE HANDLER
 // ════════════════════════════════════════════════════════════════
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  // FIX: PROCEED_ANYWAY — use sender tab, bypass check
   if (message.type === "PROCEED_ANYWAY") {
-    const { url } = message;
-    // Use sender's tab ID — more reliable than passing tabId through URL params
-    const tabId = sender.tab ? sender.tab.id : null;
-    // Add to bypass list so webNavigation listener skips this URL
+    const { url, tabId } = message;
     _pendingChecks.add(url);
-    if (tabId) {
-      chrome.tabs.update(tabId, { url }, () => {
+    const targetTab = tabId || (sender.tab ? sender.tab.id : null);
+    if (targetTab) {
+      chrome.tabs.update(targetTab, { url }, () => {
         setTimeout(() => _pendingChecks.delete(url), 5000);
       });
     } else {
@@ -209,15 +191,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "GET_HISTORY_URL") {
-    sendResponse({ url: chrome.runtime.getURL("history.html") });
+  if (message.type === "GET_BLOCK_DATA") {
+    const { tabId } = message;
+    chrome.storage.session.get(`block_${tabId}`, (result) => {
+      sendResponse(result[`block_${tabId}`] || null);
+    });
+    return true; // keep channel open for async response
   }
+
 });
 
 // ════════════════════════════════════════════════════════════════
-// CLEANUP on tab close
+// CLEANUP
 // ════════════════════════════════════════════════════════════════
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove(`tab_${tabId}`);
+  chrome.storage.session.remove([`tab_${tabId}`, `block_${tabId}`]);
 });
