@@ -1,8 +1,58 @@
 {
-  "total": 80,
-  "malicious": 17,
-  "benign": 63,
+  "total": 87,
+  "malicious": 18,
+  "benign": 69,
   "history": [
+    {
+      "url": "http://go0gle.com/",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-12 13:49:34",
+      "brand": "Google"
+    },
+    {
+      "url": "https://www.google.com/search?q=g00gle&oq=g00gle&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:49:20"
+    },
+    {
+      "url": "https://www.google.com/search?q=g00gle&oq=g00gle&gs_lcrp=EgZjaHJvbWUqBwgAEAAYgAQyBwgAEAAYgAQyBwgBEAAYgAQyBwgCEAAYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyBwgGEAAYgAQyBwgHEAAYgAQyBwgIEAAYgAQyBggJEC4YQNIBCDM5MjdqMGo3qAIIsAIB8QUfhQ_fPxA_SQ&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:49:20"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:49:09"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgcIARAAGIAEMgwIAhAAGBQYhwIYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyBggGEEUYPDIGCAcQLhhA0gEINDM1MWowajeoAgCwAgA&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:49:09"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:48:55"
+    },
+    {
+      "url": "https://www.google.com/search?q=go0gle&oq=go0gle&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgcIARAAGIAEMgwIAhAAGBQYhwIYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyBggGEEUYPDIGCAcQLhhA0gEJMTA0NzhqMGo5qAIGsAIB8QVrI3K4FDhXWA&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-12 13:48:55"
+    },
     {
       "url": "http://1nstagram.cf/login",
       "prediction": "MALICIOUS",
