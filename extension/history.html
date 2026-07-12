@@ -23,10 +23,8 @@
       font-size: 13px; min-height: 100vh;
     }
     .header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 16px 32px;
-      display: flex; align-items: center; gap: 12px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 16px 32px; display: flex; align-items: center; gap: 12px;
       position: sticky; top: 0; z-index: 10;
     }
     .header-title { font-size: 18px; font-weight: 700; }
@@ -34,25 +32,22 @@
     .header-actions { margin-left: auto; display: flex; gap: 10px; }
     .btn {
       padding: 7px 14px; border-radius: 6px;
-      font-size: 12px; font-weight: 600;
-      cursor: pointer; border: none; transition: filter 0.15s;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      border: none; transition: filter 0.15s;
     }
     .btn:hover { filter: brightness(1.15); }
-    .btn-accent  { background: var(--accent); color: #fff; }
-    .btn-danger  { background: #7f1d1d; color: var(--mal); border: 1px solid var(--mal); }
     .btn-outline {
-      background: transparent; color: var(--muted);
-      border: 1px solid var(--border);
+      background: transparent; color: var(--muted); border: 1px solid var(--border);
     }
     .btn-outline:hover { color: var(--text); border-color: var(--muted); }
+    .btn-danger { background: #7f1d1d; color: var(--mal); border: 1px solid var(--mal); }
 
     .stats-row {
       display: grid; grid-template-columns: repeat(4, 1fr);
       gap: 16px; padding: 24px 32px 0;
     }
     .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 18px 20px;
     }
     .stat-label {
@@ -107,7 +102,7 @@
     .url-cell {
       max-width: 320px; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap;
-      font-size: 12px; font-family: "Courier New", monospace; color: var(--text);
+      font-size: 12px; font-family: "Courier New", monospace;
     }
     .conf-cell { color: var(--muted); font-size: 12px; }
     .src-badge {
@@ -124,17 +119,19 @@
     .spinner {
       width: 28px; height: 28px;
       border: 2px solid var(--border); border-top-color: var(--accent);
-      border-radius: 50%; animation: spin 0.7s linear infinite;
-      margin: 0 auto 12px;
+      border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .error-box {
       margin: 24px 32px;
-      background: rgba(239,68,68,0.1);
-      border: 1px solid rgba(239,68,68,0.3);
+      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
       border-radius: 8px; padding: 16px 20px;
       color: #fca5a5; font-size: 13px; line-height: 1.6;
+    }
+    .error-box code {
+      background: rgba(0,0,0,0.3); padding: 2px 6px;
+      border-radius: 3px; font-family: monospace;
     }
   </style>
 </head>
@@ -190,26 +187,38 @@
 </div>
 
 <script>
-  // FIX: get API base from chrome.storage so it matches user's setting
   const DEFAULT_API = "http://localhost:5000";
   let _allHistory   = [];
   let _filter       = "all";
   let _apiBase      = DEFAULT_API;
 
-  // FIX: load API base from storage before fetching
-  chrome.storage.sync.get({ apiBase: DEFAULT_API }, function(s) {
-    _apiBase = (s.apiBase || DEFAULT_API).replace(/\/$/, "");
-    loadData();
-  });
+  // ── FIX: Read API base from chrome.storage.sync first ────────────────────
+  // This matches whatever the user set in popup settings
+  function init() {
+    try {
+      chrome.storage.sync.get({ apiBase: DEFAULT_API }, function(s) {
+        _apiBase = (s.apiBase || DEFAULT_API).replace(/\/$/, "");
+        loadData();
+      });
+    } catch(e) {
+      // chrome.storage not available — use default
+      _apiBase = DEFAULT_API;
+      loadData();
+    }
+  }
 
   async function loadData() {
     document.getElementById("table-container").innerHTML =
       '<div class="loading"><div class="spinner"></div>Loading…</div>';
 
     try {
-      // Load stats
-      const statsRes = await fetch(`${_apiBase}/stats`);
-      if (!statsRes.ok) throw new Error("Stats fetch failed");
+      // ── FIX: Add no-cache headers to force fresh data ─────────────────────
+      const statsRes = await fetch(_apiBase + "/stats", {
+        method: "GET",
+        headers: { "Cache-Control": "no-cache" },
+      });
+
+      if (!statsRes.ok) throw new Error("HTTP " + statsRes.status);
       const stats = await statsRes.json();
 
       document.getElementById("stat-total").textContent = stats.total     ?? 0;
@@ -218,26 +227,36 @@
       document.getElementById("stat-rate" ).textContent =
         (stats.mal_rate ?? 0).toFixed(1) + "%";
 
-      // Load history
-      const histRes = await fetch(`${_apiBase}/history?limit=1000`);
-      if (!histRes.ok) throw new Error("History fetch failed");
-      const hist    = await histRes.json();
-      _allHistory   = hist.history || [];
+      const histRes = await fetch(_apiBase + "/history?limit=1000", {
+        method: "GET",
+        headers: { "Cache-Control": "no-cache" },
+      });
+
+      if (!histRes.ok) throw new Error("History HTTP " + histRes.status);
+      const hist  = await histRes.json();
+      _allHistory = hist.history || [];
       renderTable(_allHistory);
 
     } catch (err) {
-      document.getElementById("table-container").innerHTML = `
-        <div class="error-box">
-          ⚠ Cannot reach Flask API at <strong>${_apiBase}</strong><br>
-          Make sure <code>python app/app.py</code> is running.<br><br>
-          Error: ${err.message}
-        </div>`;
+      document.getElementById("table-container").innerHTML =
+        '<div class="error-box">' +
+        '⚠ Cannot reach Flask API at <strong>' + _apiBase + '</strong><br>' +
+        'Make sure <code>python app/app.py</code> is running on port 5000.<br><br>' +
+        'Error: ' + err.message +
+        '</div>';
+
+      // Reset stats to show error state
+      ["stat-total","stat-mal","stat-ben","stat-rate"].forEach(function(id) {
+        document.getElementById(id).textContent = "—";
+      });
     }
   }
 
   function setFilter(filter, btn) {
     _filter = filter;
-    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".filter-btn").forEach(function(b) {
+      b.classList.remove("active");
+    });
     btn.classList.add("active");
     applySearch();
   }
@@ -245,27 +264,27 @@
   function applySearch() {
     const query = (document.getElementById("search-input").value || "").toLowerCase();
     let data    = _allHistory;
-    if (_filter === "malicious") data = data.filter(h => h.prediction === "MALICIOUS");
-    if (_filter === "benign")    data = data.filter(h => h.prediction === "BENIGN");
-    if (query) data = data.filter(h => (h.url || "").toLowerCase().includes(query));
+    if (_filter === "malicious") data = data.filter(function(h) { return h.prediction === "MALICIOUS"; });
+    if (_filter === "benign")    data = data.filter(function(h) { return h.prediction === "BENIGN"; });
+    if (query) data = data.filter(function(h) { return (h.url || "").toLowerCase().includes(query); });
     renderTable(data);
   }
 
   function renderTable(history) {
     const container = document.getElementById("table-container");
+
     if (!history || history.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <div class="big">🔍</div>
-          <div>No URLs found</div>
-          <div style="margin-top:6px;font-size:11px;">
-            Browse some websites and results will appear here
-          </div>
-        </div>`;
+      container.innerHTML =
+        '<div class="empty-state">' +
+        '<div class="big">🔍</div>' +
+        '<div>No URLs found</div>' +
+        '<div style="margin-top:6px;font-size:11px;">Browse some websites and results will appear here</div>' +
+        '</div>';
       return;
     }
 
-    const rows = history.map((h, i) => {
+    let rows = "";
+    history.forEach(function(h, i) {
       const isMal = h.prediction === "MALICIOUS";
       const vc    = isMal ? "mal" : "ben";
       const icon  = isMal ? "⚠" : "✓";
@@ -273,51 +292,38 @@
         ? "—"
         : (h.confidence ?? 0).toFixed(1) + "%";
       const brand = h.brand
-        ? `<div style="color:var(--amber);font-size:11px;margin-top:2px;">🎭 ${escapeHtml(h.brand)}</div>`
+        ? '<div style="color:var(--amber);font-size:11px;margin-top:2px;">🎭 ' + escapeHtml(h.brand) + '</div>'
         : "";
 
-      return `
-        <tr>
-          <td style="color:var(--muted);font-size:11px;">${i + 1}</td>
-          <td><span class="verdict-badge ${vc}">${icon} ${h.prediction}</span></td>
-          <td class="url-cell">
-            <div title="${escapeHtml(h.url || '')}">${escapeHtml(h.url || '—')}</div>
-            ${brand}
-          </td>
-          <td class="conf-cell">${conf}</td>
-          <td><span class="src-badge">${escapeHtml(h.source || "model")}</span></td>
-          <td class="time-cell">${escapeHtml(h.timestamp || "—")}</td>
-        </tr>`;
-    }).join("");
+      rows +=
+        "<tr>" +
+        '<td style="color:var(--muted);font-size:11px;">' + (i + 1) + "</td>" +
+        '<td><span class="verdict-badge ' + vc + '">' + icon + " " + h.prediction + "</span></td>" +
+        '<td class="url-cell"><div title="' + escapeHtml(h.url || "") + '">' + escapeHtml(h.url || "—") + "</div>" + brand + "</td>" +
+        '<td class="conf-cell">' + conf + "</td>" +
+        '<td><span class="src-badge">' + escapeHtml(h.source || "model") + "</span></td>" +
+        '<td class="time-cell">' + escapeHtml(h.timestamp || "—") + "</td>" +
+        "</tr>";
+    });
 
-    container.innerHTML = `
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Verdict</th>
-            <th>URL</th>
-            <th>Confidence</th>
-            <th>Source</th>
-            <th>Time (UTC)</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+    container.innerHTML =
+      "<table>" +
+      "<thead><tr>" +
+      "<th>#</th><th>Verdict</th><th>URL</th><th>Confidence</th><th>Source</th><th>Time (UTC)</th>" +
+      "</tr></thead>" +
+      "<tbody>" + rows + "</tbody>" +
+      "</table>";
   }
 
   async function clearHistory() {
-    const confirmed = confirm(
-      "Clear all URL history and statistics?\nThis cannot be undone."
-    );
-    if (!confirmed) return;
+    if (!confirm("Clear all URL history and statistics?\nThis cannot be undone.")) return;
     try {
-      await fetch(`${_apiBase}/stats/clear`, { method: "POST" });
+      await fetch(_apiBase + "/stats/clear", { method: "POST" });
       _allHistory = [];
-      document.getElementById("stat-total").textContent = "0";
-      document.getElementById("stat-mal"  ).textContent = "0";
-      document.getElementById("stat-ben"  ).textContent = "0";
-      document.getElementById("stat-rate" ).textContent = "0.0%";
+      ["stat-total","stat-mal","stat-ben"].forEach(function(id) {
+        document.getElementById(id).textContent = "0";
+      });
+      document.getElementById("stat-rate").textContent = "0.0%";
       renderTable([]);
     } catch (_) {
       alert("Failed to clear — is Flask running?");
@@ -329,6 +335,9 @@
       .replace(/&/g,"&amp;").replace(/</g,"&lt;")
       .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
+
+  // Boot
+  init();
 </script>
 </body>
 </html>
