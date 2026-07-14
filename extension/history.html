@@ -144,8 +144,8 @@
     <div class="header-sub">All URLs checked by the ML detector</div>
   </div>
   <div class="header-actions">
-    <button class="btn btn-outline" onclick="loadData()">↻ Refresh</button>
-    <button class="btn btn-danger"  onclick="clearHistory()">🗑 Clear History</button>
+    <button class="btn btn-outline" id="refresh-btn">↻ Refresh</button>
+    <button class="btn btn-danger"  id="clear-btn">🗑 Clear History</button>
   </div>
 </div>
 
@@ -170,11 +170,11 @@
 
 <div class="filters">
   <span class="filter-label">Filter:</span>
-  <button class="filter-btn active" onclick="setFilter('all',       this)">All</button>
-  <button class="filter-btn"        onclick="setFilter('malicious', this)">⚠ Malicious</button>
-  <button class="filter-btn"        onclick="setFilter('benign',    this)">✓ Benign</button>
+  <button class="filter-btn active" id="filter-all">All</button>
+  <button class="filter-btn"        id="filter-mal">⚠ Malicious</button>
+  <button class="filter-btn"        id="filter-ben">✓ Benign</button>
   <input  class="search-input" id="search-input" type="text"
-          placeholder="Search URLs…" oninput="applySearch()" />
+          placeholder="Search URLs…" />
 </div>
 
 <div class="table-wrap">
@@ -186,158 +186,6 @@
   </div>
 </div>
 
-<script>
-  const DEFAULT_API = "http://localhost:5000";
-  let _allHistory   = [];
-  let _filter       = "all";
-  let _apiBase      = DEFAULT_API;
-
-  // ── FIX: Read API base from chrome.storage.sync first ────────────────────
-  // This matches whatever the user set in popup settings
-  function init() {
-    try {
-      chrome.storage.sync.get({ apiBase: DEFAULT_API }, function(s) {
-        _apiBase = (s.apiBase || DEFAULT_API).replace(/\/$/, "");
-        loadData();
-      });
-    } catch(e) {
-      // chrome.storage not available — use default
-      _apiBase = DEFAULT_API;
-      loadData();
-    }
-  }
-
-  async function loadData() {
-    document.getElementById("table-container").innerHTML =
-      '<div class="loading"><div class="spinner"></div>Loading…</div>';
-
-    try {
-      // ── FIX: Add no-cache headers to force fresh data ─────────────────────
-      const statsRes = await fetch(_apiBase + "/stats", {
-        method: "GET",
-        headers: { "Cache-Control": "no-cache" },
-      });
-
-      if (!statsRes.ok) throw new Error("HTTP " + statsRes.status);
-      const stats = await statsRes.json();
-
-      document.getElementById("stat-total").textContent = stats.total     ?? 0;
-      document.getElementById("stat-mal"  ).textContent = stats.malicious ?? 0;
-      document.getElementById("stat-ben"  ).textContent = stats.benign    ?? 0;
-      document.getElementById("stat-rate" ).textContent =
-        (stats.mal_rate ?? 0).toFixed(1) + "%";
-
-      const histRes = await fetch(_apiBase + "/history?limit=1000", {
-        method: "GET",
-        headers: { "Cache-Control": "no-cache" },
-      });
-
-      if (!histRes.ok) throw new Error("History HTTP " + histRes.status);
-      const hist  = await histRes.json();
-      _allHistory = hist.history || [];
-      renderTable(_allHistory);
-
-    } catch (err) {
-      document.getElementById("table-container").innerHTML =
-        '<div class="error-box">' +
-        '⚠ Cannot reach Flask API at <strong>' + _apiBase + '</strong><br>' +
-        'Make sure <code>python app/app.py</code> is running on port 5000.<br><br>' +
-        'Error: ' + err.message +
-        '</div>';
-
-      // Reset stats to show error state
-      ["stat-total","stat-mal","stat-ben","stat-rate"].forEach(function(id) {
-        document.getElementById(id).textContent = "—";
-      });
-    }
-  }
-
-  function setFilter(filter, btn) {
-    _filter = filter;
-    document.querySelectorAll(".filter-btn").forEach(function(b) {
-      b.classList.remove("active");
-    });
-    btn.classList.add("active");
-    applySearch();
-  }
-
-  function applySearch() {
-    const query = (document.getElementById("search-input").value || "").toLowerCase();
-    let data    = _allHistory;
-    if (_filter === "malicious") data = data.filter(function(h) { return h.prediction === "MALICIOUS"; });
-    if (_filter === "benign")    data = data.filter(function(h) { return h.prediction === "BENIGN"; });
-    if (query) data = data.filter(function(h) { return (h.url || "").toLowerCase().includes(query); });
-    renderTable(data);
-  }
-
-  function renderTable(history) {
-    const container = document.getElementById("table-container");
-
-    if (!history || history.length === 0) {
-      container.innerHTML =
-        '<div class="empty-state">' +
-        '<div class="big">🔍</div>' +
-        '<div>No URLs found</div>' +
-        '<div style="margin-top:6px;font-size:11px;">Browse some websites and results will appear here</div>' +
-        '</div>';
-      return;
-    }
-
-    let rows = "";
-    history.forEach(function(h, i) {
-      const isMal = h.prediction === "MALICIOUS";
-      const vc    = isMal ? "mal" : "ben";
-      const icon  = isMal ? "⚠" : "✓";
-      const conf  = h.source === "whitelist"
-        ? "—"
-        : (h.confidence ?? 0).toFixed(1) + "%";
-      const brand = h.brand
-        ? '<div style="color:var(--amber);font-size:11px;margin-top:2px;">🎭 ' + escapeHtml(h.brand) + '</div>'
-        : "";
-
-      rows +=
-        "<tr>" +
-        '<td style="color:var(--muted);font-size:11px;">' + (i + 1) + "</td>" +
-        '<td><span class="verdict-badge ' + vc + '">' + icon + " " + h.prediction + "</span></td>" +
-        '<td class="url-cell"><div title="' + escapeHtml(h.url || "") + '">' + escapeHtml(h.url || "—") + "</div>" + brand + "</td>" +
-        '<td class="conf-cell">' + conf + "</td>" +
-        '<td><span class="src-badge">' + escapeHtml(h.source || "model") + "</span></td>" +
-        '<td class="time-cell">' + escapeHtml(h.timestamp || "—") + "</td>" +
-        "</tr>";
-    });
-
-    container.innerHTML =
-      "<table>" +
-      "<thead><tr>" +
-      "<th>#</th><th>Verdict</th><th>URL</th><th>Confidence</th><th>Source</th><th>Time (UTC)</th>" +
-      "</tr></thead>" +
-      "<tbody>" + rows + "</tbody>" +
-      "</table>";
-  }
-
-  async function clearHistory() {
-    if (!confirm("Clear all URL history and statistics?\nThis cannot be undone.")) return;
-    try {
-      await fetch(_apiBase + "/stats/clear", { method: "POST" });
-      _allHistory = [];
-      ["stat-total","stat-mal","stat-ben"].forEach(function(id) {
-        document.getElementById(id).textContent = "0";
-      });
-      document.getElementById("stat-rate").textContent = "0.0%";
-      renderTable([]);
-    } catch (_) {
-      alert("Failed to clear — is Flask running?");
-    }
-  }
-
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
-
-  // Boot
-  init();
-</script>
+<script src="history.js"></script>
 </body>
 </html>
