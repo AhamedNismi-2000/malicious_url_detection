@@ -1,6 +1,175 @@
 {
-  "total": 0,
-  "malicious": 0,
-  "benign": 0,
-  "history": []
+  "total": 24,
+  "malicious": 2,
+  "benign": 22,
+  "history": [
+    {
+      "url": "https://microsoft.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:11:42"
+    },
+    {
+      "url": "https://microsoft.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:11:40"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:11:11"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:44"
+    },
+    {
+      "url": "https://claude.ai/chat/040ef779-9a38-479b-969a-b0c0c5905917",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:44"
+    },
+    {
+      "url": "https://trailhead.salesforce.com/",
+      "prediction": "BENIGN",
+      "confidence": 24.3,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:34"
+    },
+    {
+      "url": "https://trailhead.salesforce.com/",
+      "prediction": "BENIGN",
+      "confidence": 24.3,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:31"
+    },
+    {
+      "url": "https://manage.wix.com/dashboard/932506d0-9a48-4acf-9865-9b0e2c892b57/wix-portfolio/ai-cluster",
+      "prediction": "BENIGN",
+      "confidence": 24.8,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:21"
+    },
+    {
+      "url": "https://www.humanizeaitext.org/",
+      "prediction": "BENIGN",
+      "confidence": 34.2,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:16"
+    },
+    {
+      "url": "https://github.com/AhamedNismi-2000",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:13"
+    },
+    {
+      "url": "https://chatgpt.com/c/6a4a7688-3d78-83ee-b37c-4e35c93977e9?mweb_fallback=1",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:13"
+    },
+    {
+      "url": "https://www.canva.com/dream-lab",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:12"
+    },
+    {
+      "url": "https://chat.deepseek.com/a/chat/s/69d4d833-4578-4a44-8188-73baa62cbf40",
+      "prediction": "BENIGN",
+      "confidence": 27.6,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:08"
+    },
+    {
+      "url": "https://web.whatsapp.com/",
+      "prediction": "BENIGN",
+      "confidence": 25.2,
+      "source": "model",
+      "timestamp": "2026-07-14 16:10:08"
+    },
+    {
+      "url": "https://www.udemy.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:08"
+    },
+    {
+      "url": "https://claude.ai/chat/c2c4d466-8432-40f6-bbe9-8f0fd306e712",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:08"
+    },
+    {
+      "url": "https://leetcode.com/problems/find-invalid-ip-addresses/submissions/2053706110/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:07"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:03"
+    },
+    {
+      "url": "https://www.overleaf.com/project/6a1d239c55dbf4df1cd5e021",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:10:03"
+    },
+    {
+      "url": "http://phishing.ru/en/",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-14 16:07:06"
+    },
+    {
+      "url": "http://phishing.ru/",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-14 16:07:03"
+    },
+    {
+      "url": "https://www.afternic.com/forsale/evil.xyz?utm_source=TDFS_DASLNC&utm_medium=p%E2%80%A6",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:06:37"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:06:22"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-14 16:06:19"
+    }
+  ]
 }
