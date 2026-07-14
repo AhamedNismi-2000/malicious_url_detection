@@ -58,7 +58,6 @@
     h1 { font-size: 26px; font-weight: 700; color: var(--red); margin-bottom: 6px; }
     .subtitle { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
 
-    /* Loading state */
     .loading-state {
       text-align: center; padding: 20px;
       color: var(--muted); font-size: 13px;
@@ -153,13 +152,11 @@
     <h1>Dangerous Site Blocked</h1>
     <p class="subtitle">Our ML model detected this URL as malicious and blocked it to protect you.</p>
 
-    <!-- Loading state while fetching data from storage -->
     <div class="loading-state" id="loading-state">
       <div class="spinner"></div>
       Loading threat details…
     </div>
 
-    <!-- Content (hidden until data loads) -->
     <div id="content" style="display:none;">
       <div class="conf-box">
         <div class="conf-pct" id="conf-pct">0%</div>
@@ -200,127 +197,6 @@
     </p>
   </div>
 
-  <script>
-    // ── Read tabId from URL params ─────────────────────────────────────────────
-    const params = new URLSearchParams(window.location.search);
-    const tabId  = parseInt(params.get("tabId") || "0");
-
-    let _blockedUrl    = "";
-    let _confidence    = 0;
-
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-    }
-
-    // ── FIX: Load data from chrome.storage.session instead of URL params ──────
-    // URL params had encoding issues with JSON and length limits
-    function loadBlockData() {
-      chrome.storage.session.get(`block_${tabId}`, function(result) {
-        const data = result[`block_${tabId}`];
-
-        if (!data) {
-          // Fallback: try URL params directly (older format)
-          _blockedUrl = params.get("url") || "";
-          _confidence = parseFloat(params.get("confidence") || "0");
-          const brand      = params.get("brand") || "";
-          const realDomain = params.get("real")  || "";
-          let reasons = [];
-          try { reasons = JSON.parse(params.get("reasons") || "[]"); } catch(_) {}
-          renderData({ url: _blockedUrl, confidence: _confidence, brand, real: realDomain, reasons });
-          return;
-        }
-
-        _blockedUrl = data.url        || "";
-        _confidence = data.confidence || 0;
-        renderData(data);
-      });
-    }
-
-    function renderData(data) {
-      // Hide loading, show content
-      document.getElementById("loading-state").style.display = "none";
-      document.getElementById("content").style.display       = "block";
-
-      // Confidence
-      document.getElementById("conf-pct").textContent = (_confidence || data.confidence || 0).toFixed(1) + "%";
-      setTimeout(() => {
-        document.getElementById("conf-bar").style.width =
-          Math.min(data.confidence || 0, 100) + "%";
-      }, 100);
-
-      // URL
-      document.getElementById("blocked-url").textContent = data.url || "—";
-
-      // Brand
-      if (data.brand) {
-        document.getElementById("brand-box").style.display = "flex";
-        document.getElementById("brand-name").textContent  = data.brand;
-        document.getElementById("brand-real").textContent  = data.real || (data.brand + ".com");
-      }
-
-      // Reasons
-      const reasons = data.reasons || [];
-      if (reasons.length > 0) {
-        document.getElementById("reasons-section").style.display = "block";
-        const list = document.getElementById("reason-list");
-        reasons.forEach(function(r, i) {
-          const item = document.createElement("div");
-          item.className = "reason-item";
-          item.innerHTML =
-            '<div class="reason-num">' + (i + 1) + '</div>' +
-            '<div class="reason-text">' + escapeHtml(String(r)) + '</div>';
-          list.appendChild(item);
-        });
-      }
-    }
-
-    // ── FIX: Back button ──────────────────────────────────────────────────────
-    // Opens a new tab page — reliable across all browsers
-    document.getElementById("btn-back").addEventListener("click", function() {
-      chrome.tabs.create({ url: "chrome://newtab" });
-    });
-
-    // ── FIX: Proceed button ───────────────────────────────────────────────────
-    document.getElementById("btn-proceed").addEventListener("click", function() {
-      if (!_blockedUrl) {
-        // Try to get URL from page if not set yet
-        chrome.storage.session.get("block_" + tabId, function(result) {
-          const data = result["block_" + tabId];
-          if (data && data.url) {
-            _blockedUrl = data.url;
-            doProceeed();
-          }
-        });
-        return;
-      }
-      doProceeed();
-    });
-
-    function doProceeed() {
-      const confirmed = confirm(
-        "⚠ WARNING\n\n" +
-        "This site was classified as MALICIOUS.\n\n" +
-        "Proceeding may expose you to phishing, malware, or data theft.\n\n" +
-        "Are you sure you want to continue?"
-      );
-      if (!confirmed) return;
-
-      // FIX: Send message with tabId so background.js can update the right tab
-      chrome.runtime.sendMessage(
-        { type: "PROCEED_ANYWAY", url: _blockedUrl, tabId: tabId },
-        function(response) {
-          if (chrome.runtime.lastError) {
-            // Direct fallback if message fails
-            window.location.href = _blockedUrl;
-          }
-        }
-      );
-    }
-
-    // ── Boot ──────────────────────────────────────────────────────────────────
-    loadBlockData();
-  </script>
+  <script src="blocked.js"></script>
 </body>
 </html>
