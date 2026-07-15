@@ -1,8 +1,777 @@
 {
-  "total": 24,
-  "malicious": 2,
-  "benign": 22,
+  "total": 132,
+  "malicious": 32,
+  "benign": 100,
   "history": [
+    {
+      "url": "https://worldofpcgames.com/",
+      "prediction": "BENIGN",
+      "confidence": 4.7,
+      "source": "model",
+      "timestamp": "2026-07-15 05:32:43"
+    },
+    {
+      "url": "https://www.google.com/search?q=world+of+pc+games+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQntVhxSx1Ag9REU8Sx_IPq9bwtTTPg%3A1784093515121&ei=SxtXat3_BuePseMPvvyEiAM&ved=0ahUKEwid0duh-tOVAxXnR2wGHT4-ATEQ4dUDCBA&uact=5&oq=world+of+pc+games+&gs_lp=Egxnd3Mtd2l6LXNlcnAiEndvcmxkIG9mIHBjIGdhbWVzIDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAY7wUyBRAAGO8FSNwzUL0GWKYycAN4AJABAJgBkQKgAZMeqgEGMC4xMi43uAEDyAEA-AEBmAIUoAK8HagCFMICBxAjGOoCGCfCAgcQLhjqAhgnwgIQEAAYAxiPARjqAhi0AtgBAcICEBAuGAMYjwEY6gIYtALYAQHCAgQQIxgnwgIKEAAYgAQYigUYQ8ICEBAAGIAEGIoFGEMYsQMYgwHCAhYQLhiABBiKBRhDGLEDGIMBGMcBGNEDwgILEC4YgAQYsQMYgwHCAggQABiABBixA8ICChAuGIAEGIoFGEPCAhAQLhhDGIMBGLEDGIAEGIoFwgIQEC4YgAQYigUYQxixAxiDAcICDhAAGIAEGIoFGLEDGIMBwgIHECMYsQIYJ8ICCxAuGIAEGIoFGJECwgIPEC4YChgLGIMBGLEDGIAEwgIQEAAYgAQYigUYChixAxiDAcICDxAAGIAEGAoYCxixAxiDAcICCRAAGIAEGAoYC8ICDRAuGIAEGIoFGEMYsQPCAgUQLhiABMICChAAGIAEGBQYhwLCAgsQLhiABBjHARivAcICGhAuGIAEGMcBGK8BGJcFGNwEGN4EGOAE2AEBwgIIEAAYgAQYywHCAgsQABiABBiKBRiGA5gDCuIDBRIBMSBA8QV1fpIMJNv4_ogGAboGBggBEAEYCpIHBjIuMTAuOKAHsacBsgcGMC4xMC44uAeqHcIHCDAuNC4xNS4xyAddgAgB&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:32:30"
+    },
+    {
+      "url": "https://worldofpcgames.com/",
+      "prediction": "BENIGN",
+      "confidence": 4.7,
+      "source": "model",
+      "timestamp": "2026-07-15 05:32:21"
+    },
+    {
+      "url": "https://worldofpcgames.com/",
+      "prediction": "BENIGN",
+      "confidence": 4.7,
+      "source": "model",
+      "timestamp": "2026-07-15 05:32:21"
+    },
+    {
+      "url": "https://www.google.com/search?q=world+of+pc+games+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQntVhxSx1Ag9REU8Sx_IPq9bwtTTPg%3A1784093515121&ei=SxtXat3_BuePseMPvvyEiAM&ved=0ahUKEwid0duh-tOVAxXnR2wGHT4-ATEQ4dUDCBA&uact=5&oq=world+of+pc+games+&gs_lp=Egxnd3Mtd2l6LXNlcnAiEndvcmxkIG9mIHBjIGdhbWVzIDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAY7wUyBRAAGO8FSNwzUL0GWKYycAN4AJABAJgBkQKgAZMeqgEGMC4xMi43uAEDyAEA-AEBmAIUoAK8HagCFMICBxAjGOoCGCfCAgcQLhjqAhgnwgIQEAAYAxiPARjqAhi0AtgBAcICEBAuGAMYjwEY6gIYtALYAQHCAgQQIxgnwgIKEAAYgAQYigUYQ8ICEBAAGIAEGIoFGEMYsQMYgwHCAhYQLhiABBiKBRhDGLEDGIMBGMcBGNEDwgILEC4YgAQYsQMYgwHCAggQABiABBixA8ICChAuGIAEGIoFGEPCAhAQLhhDGIMBGLEDGIAEGIoFwgIQEC4YgAQYigUYQxixAxiDAcICDhAAGIAEGIoFGLEDGIMBwgIHECMYsQIYJ8ICCxAuGIAEGIoFGJECwgIPEC4YChgLGIMBGLEDGIAEwgIQEAAYgAQYigUYChixAxiDAcICDxAAGIAEGAoYCxixAxiDAcICCRAAGIAEGAoYC8ICDRAuGIAEGIoFGEMYsQPCAgUQLhiABMICChAAGIAEGBQYhwLCAgsQLhiABBjHARivAcICGhAuGIAEGMcBGK8BGJcFGNwEGN4EGOAE2AEBwgIIEAAYgAQYywHCAgsQABiABBiKBRiGA5gDCuIDBRIBMSBA8QV1fpIMJNv4_ogGAboGBggBEAEYCpIHBjIuMTAuOKAHsacBsgcGMC4xMC44uAeqHcIHCDAuNC4xNS4xyAddgAgB&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:32:16"
+    },
+    {
+      "url": "https://www.google.com/search?q=oceans+of+games+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuopLnc5AF7kc1nmNoDD8SwU50gLA%3A1784093481401&source=hp&ei=KRtXaqmHFqLgseMPmZbasAg&iflsig=ABILxe8AAAAAalcpOW_4iBR18SK2JH4aDMZYBhTBRTEd&ved=0ahUKEwjpv8-R-tOVAxUicGwGHRmLFoYQ4dUDCCk&uact=5&oq=oceans+of+games+&gs_lp=Egdnd3Mtd2l6IhBvY2VhbnMgb2YgZ2FtZXMgMgkQABiABBgKGAtIzUNQzxtYhkJwBXgAkAEBmAGrAqABtCOqAQQyLTE4uAEDyAEA-AEBmAIWoALVIagCCsICBxAjGOoCGCfCAgcQLhjqAhgnwgIEEC4YJ8ICBBAjGCfCAgoQABiABBiKBRhDwgIQEC4YgAQYigUYQxjHARjRA8ICCxAAGIAEGIoFGLEDwgILEAAYgAQYsQMYgwHCAgUQABiABMICDRAAGIAEGIoFGEMYsQPCAg0QLhiABBiKBRhDGLEDwgIQEAAYgAQYigUYQxixAxiDAcICChAuGIAEGIoFGEPCAgoQABiABBgUGIcCwgIIEAAYgAQYsQPCAgoQLhiABBgUGIcCwgIHEC4YgAQYCsICERAuGIAEGMcBGK8BGJgFGJkFwgIFEC4YgATCAggQABiABBiiBMICBRAAGO8FwgIVEC4YgAQYChgLGMcBGK8BGJgFGJkFmAMD8QXMU6wrK_sF_ZIHCDUuMC4xNi4xoAeXigGyBwYyLTE2LjG4B78hwgcGNS42LjExyAc2gAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:32:09"
+    },
+    {
+      "url": "https://oceantogames.com/",
+      "prediction": "BENIGN",
+      "confidence": 4.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:32:01"
+    },
+    {
+      "url": "https://oceantogames.com/",
+      "prediction": "BENIGN",
+      "confidence": 4.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:32:01"
+    },
+    {
+      "url": "https://www.google.com/search?q=oceans+of+games+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuopLnc5AF7kc1nmNoDD8SwU50gLA%3A1784093481401&source=hp&ei=KRtXaqmHFqLgseMPmZbasAg&iflsig=ABILxe8AAAAAalcpOW_4iBR18SK2JH4aDMZYBhTBRTEd&ved=0ahUKEwjpv8-R-tOVAxUicGwGHRmLFoYQ4dUDCCk&uact=5&oq=oceans+of+games+&gs_lp=Egdnd3Mtd2l6IhBvY2VhbnMgb2YgZ2FtZXMgMgkQABiABBgKGAtIzUNQzxtYhkJwBXgAkAEBmAGrAqABtCOqAQQyLTE4uAEDyAEA-AEBmAIWoALVIagCCsICBxAjGOoCGCfCAgcQLhjqAhgnwgIEEC4YJ8ICBBAjGCfCAgoQABiABBiKBRhDwgIQEC4YgAQYigUYQxjHARjRA8ICCxAAGIAEGIoFGLEDwgILEAAYgAQYsQMYgwHCAgUQABiABMICDRAAGIAEGIoFGEMYsQPCAg0QLhiABBiKBRhDGLEDwgIQEAAYgAQYigUYQxixAxiDAcICChAuGIAEGIoFGEPCAgoQABiABBgUGIcCwgIIEAAYgAQYsQPCAgoQLhiABBgUGIcCwgIHEC4YgAQYCsICERAuGIAEGMcBGK8BGJgFGJkFwgIFEC4YgATCAggQABiABBiiBMICBRAAGO8FwgIVEC4YgAQYChgLGMcBGK8BGJgFGJkFmAMD8QXMU6wrK_sF_ZIHCDUuMC4xNi4xoAeXigGyBwYyLTE2LjG4B78hwgcGNS42LjExyAc2gAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:56"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:46"
+    },
+    {
+      "url": "https://www.google.com/search?q=pixel&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuopLnc5AF7kc1nmNoDD8SwU50gLA%3A1784093481401&source=hp&ei=KRtXaqmHFqLgseMPmZbasAg&iflsig=ABILxe8AAAAAalcpOW_4iBR18SK2JH4aDMZYBhTBRTEd&ved=0ahUKEwjpv8-R-tOVAxUicGwGHRmLFoYQ4dUDCCk&uact=5&oq=pixel&gs_lp=Egdnd3Mtd2l6IgVwaXhlbDILEAAYgAQYigUYkQIyCxAAGIAEGIoFGJECMgsQABiABBiKBRiRAjILEAAYgAQYigUYkQIyCxAAGIAEGIoFGJECMg0QABiABBiKBRhDGLEDMhAQLhhDGIMBGLEDGIAEGIoFMg0QABiABBiKBRhDGLEDMg0QABiABBiKBRhDGLEDMgoQABiABBiKBRhDSKo2UKQhWIM1cAN4AJABAZgBrgKgAZoPqgEHMC4yLjUuMbgBA8gBAPgBAZgCCqACmw2oAgrCAgcQIxjqAhgnwgIHEC4Y6gIYJ8ICBBAjGCfCAhQQLhiABBiKBRiRAhixAxjHARjRA8ICDhAAGIAEGIoFGJECGLEDwgITEC4YgAQYigUYQxixAxjHARjRA8ICDhAAGIAEGIoFGLEDGIMBwgILEAAYgAQYsQMYgwHCAg4QLhiABBiKBRixAxiDAcICEBAAGIAEGIoFGEMYsQMYgwHCAgsQLhiABBiKBRiRAsICFBAuGIAEGIoFGJECGLEDGMcBGK8BwgIQEC4YgAQYigUYQxixAxiDAcICChAuGIAEGIoFGEPCAgkQABiABBgKGAuYAwrxBcxTrCsr-wX9kgcFMy4yLjWgB_BCsgcFMC4yLjW4B4kNwgcHMC42LjMuMcgHJIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:40"
+    },
+    {
+      "url": "https://store.google.com/regionpicker?hl=en-US&srsltid=AfmBOorSKVqClN9zOO03ZgrQ64ZV6_wbjJmhOnK7JR6y0bPRvMLGX8Hp&pli=1",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:38"
+    },
+    {
+      "url": "https://store.google.com/category/phones?hl=en-US&srsltid=AfmBOorSKVqClN9zOO03ZgrQ64ZV6_wbjJmhOnK7JR6y0bPRvMLGX8Hp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:34"
+    },
+    {
+      "url": "https://www.google.com/search?q=pixel&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuopLnc5AF7kc1nmNoDD8SwU50gLA%3A1784093481401&source=hp&ei=KRtXaqmHFqLgseMPmZbasAg&iflsig=ABILxe8AAAAAalcpOW_4iBR18SK2JH4aDMZYBhTBRTEd&ved=0ahUKEwjpv8-R-tOVAxUicGwGHRmLFoYQ4dUDCCk&uact=5&oq=pixel&gs_lp=Egdnd3Mtd2l6IgVwaXhlbDILEAAYgAQYigUYkQIyCxAAGIAEGIoFGJECMgsQABiABBiKBRiRAjILEAAYgAQYigUYkQIyCxAAGIAEGIoFGJECMg0QABiABBiKBRhDGLEDMhAQLhhDGIMBGLEDGIAEGIoFMg0QABiABBiKBRhDGLEDMg0QABiABBiKBRhDGLEDMgoQABiABBiKBRhDSKo2UKQhWIM1cAN4AJABAZgBrgKgAZoPqgEHMC4yLjUuMbgBA8gBAPgBAZgCCqACmw2oAgrCAgcQIxjqAhgnwgIHEC4Y6gIYJ8ICBBAjGCfCAhQQLhiABBiKBRiRAhixAxjHARjRA8ICDhAAGIAEGIoFGJECGLEDwgITEC4YgAQYigUYQxixAxjHARjRA8ICDhAAGIAEGIoFGLEDGIMBwgILEAAYgAQYsQMYgwHCAg4QLhiABBiKBRixAxiDAcICEBAAGIAEGIoFGEMYsQMYgwHCAgsQLhiABBiKBRiRAsICFBAuGIAEGIoFGJECGLEDGMcBGK8BwgIQEC4YgAQYigUYQxixAxiDAcICChAuGIAEGIoFGEPCAgkQABiABBgKGAuYAwrxBcxTrCsr-wX9kgcFMy4yLjWgB_BCsgcFMC4yLjW4B4kNwgcHMC42LjMuMcgHJIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:32"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:22"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "BENIGN",
+      "confidence": 29.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:31:10"
+    },
+    {
+      "url": "https://www.google.com/search?q=easeat.lk&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuP5AtdtkB2qSys5Z0tZAj6T6wTAg%3A1784093462821&source=hp&ei=FhtXat3gL4XhseMP49DSwAs&iflsig=ABILxe8AAAAAalcpJhr8quDnviNbaQjD2MePzqwaJZt9&oq=ease&gs_lp=Egdnd3Mtd2l6IgRlYXNlKgIIADIEECMYJzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQzIQEC4YgAQYigUYQxjHARjRAzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQzIKEAAYgAQYigUYQ0iiDlAAWIoHcAB4AJABAJgB-wGgAdUHqgEDMi00uAEDyAEA-AEBmAIEoALwB8ICDRAAGIAEGIoFGEMYsQPCAgoQLhiABBiKBRhDwgINEC4YgAQYigUYQxixA5gDAJIHAzItNKAHkSSyBwMyLTS4B_AHwgcHMC4yLjEuMcgHE4AIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:07"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:31:04"
+    },
+    {
+      "url": "https://www.google.com/search?q=elephant+house+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuS3zOC9RO7f3joY7BA4smr5bTNfw%3A1784093051189&source=hp&ei=exlXaoKrCZTR1sQPncXnsAs&iflsig=ABILxe8AAAAAalcnizQXWF0KuuHe144K1tbgwnRsFzao&ved=0ahUKEwjC1L3E-NOVAxWUqJUCHZ3iGbYQ4dUDCCk&uact=5&oq=elephant+house+&gs_lp=Egdnd3Mtd2l6Ig9lbGVwaGFudCBob3VzZSAyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAESOqpAVDce1jypwFwBXgAkAEAmAGwBKABtSeqAQswLjYuNy4wLjMuMrgBA8gBAPgBAZgCF6ACjSioAgrCAgcQIxjqAhgnwgIEECMYJ8ICChAAGIAEGIoFGEPCAgoQLhiABBiKBRhDwgIQEAAYgAQYigUYQxixAxiDAcICDhAAGIAEGIoFGLEDGIMBwgILEAAYgAQYigUYkQLCAhAQLhiABBiKBRhDGMcBGNEDwgINEC4YgAQYigUYQxixA8ICFhAuGIAEGIoFGEMYsQMYgwEYxwEY0QPCAg0QABiABBiKBRhDGLEDwgIMEAAYgAQYChgLGLEDwgIJEAAYgAQYChgLwgISEC4YgAQYChgLGLEDGMcBGNEDwgITEC4YgAQYxwEYrwEYmAUYmQUYCsICBxAAGIAEGArCAg4QLhiABBixAxjHARjRA5gDBfEFEH8eslBM2RSSBwk1LjYuNy4wLjWgB_uyAbIHCTAuNi43LjAuNbgH-CfCBwYwLjE0LjnIB0CACAE&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:25:30"
+    },
+    {
+      "url": "https://www.elephanthouse.lk/",
+      "prediction": "BENIGN",
+      "confidence": 29.3,
+      "source": "model",
+      "timestamp": "2026-07-15 05:25:22"
+    },
+    {
+      "url": "https://www.google.com/search?q=elephant+house+&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuS3zOC9RO7f3joY7BA4smr5bTNfw%3A1784093051189&source=hp&ei=exlXaoKrCZTR1sQPncXnsAs&iflsig=ABILxe8AAAAAalcnizQXWF0KuuHe144K1tbgwnRsFzao&ved=0ahUKEwjC1L3E-NOVAxWUqJUCHZ3iGbYQ4dUDCCk&uact=5&oq=elephant+house+&gs_lp=Egdnd3Mtd2l6Ig9lbGVwaGFudCBob3VzZSAyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAESOqpAVDce1jypwFwBXgAkAEAmAGwBKABtSeqAQswLjYuNy4wLjMuMrgBA8gBAPgBAZgCF6ACjSioAgrCAgcQIxjqAhgnwgIEECMYJ8ICChAAGIAEGIoFGEPCAgoQLhiABBiKBRhDwgIQEAAYgAQYigUYQxixAxiDAcICDhAAGIAEGIoFGLEDGIMBwgILEAAYgAQYigUYkQLCAhAQLhiABBiKBRhDGMcBGNEDwgINEC4YgAQYigUYQxixA8ICFhAuGIAEGIoFGEMYsQMYgwEYxwEY0QPCAg0QABiABBiKBRhDGLEDwgIMEAAYgAQYChgLGLEDwgIJEAAYgAQYChgLwgISEC4YgAQYChgLGLEDGMcBGNEDwgITEC4YgAQYxwEYrwEYmAUYmQUYCsICBxAAGIAEGArCAg4QLhiABBixAxjHARjRA5gDBfEFEH8eslBM2RSSBwk1LjYuNy4wLjWgB_uyAbIHCTAuNi43LjAuNbgH-CfCBwYwLjE0LjnIB0CACAE&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:25:20"
+    },
+    {
+      "url": "https://www.google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:57"
+    },
+    {
+      "url": "https://www.google.com/search?q=getintopc&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuS3zOC9RO7f3joY7BA4smr5bTNfw%3A1784093051189&source=hp&ei=exlXaoKrCZTR1sQPncXnsAs&iflsig=ABILxe8AAAAAalcnizQXWF0KuuHe144K1tbgwnRsFzao&ved=0ahUKEwjC1L3E-NOVAxWUqJUCHZ3iGbYQ4dUDCCk&uact=5&oq=getintopc&gs_lp=Egdnd3Mtd2l6IglnZXRpbnRvcGNIwx9QAFibHnAAeACQAQGYAYYDoAGMDqoBBzAuNS4yLjG4AQPIAQD4AQGYAgSgAvcGwgIEECMYJ8ICFhAuGIAEGIoFGEMYsQMYgwEYxwEY0QPCAg0QABiABBiKBRhDGLEDwgIKEAAYgAQYigUYQ8ICCxAAGIAEGLEDGIMBwgIKEC4YgAQYigUYQ8ICDRAuGEMYsQMYgAQYigXCAggQABiABBixA8ICBRAAGIAEwgIOEC4YgAQYsQMYxwEY0QOYAwCSBwUwLjEuM6AHmTGyBwUwLjEuM7gH9wbCBwcwLjEuMi4xyAcQgAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:56"
+    },
+    {
+      "url": "https://www.google.com/search?q=ocean+university&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnsi85YDX4-cddpNs95l5YDC_kmpAw%3A1784093056633&ei=gBlXauGVJoCRnesPqfCxsQc&gs_ssp=eJzj4tVP1zc0zEiySMrILYo3YPQSyE9OTcxTKM3LLEstKs4sqQQAsQELXA&oq=ocea&gs_lp=Egxnd3Mtd2l6LXNlcnAiBG9jZWEqAggCMgoQABiABBiKBRhDMg0QABiABBiKBRhDGLEDMggQLhixAxiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyFxAuGLEDGIAEGJcFGNwEGN4EGOAE2AEBSK0uUJYIWL0TcAJ4AJABAJgB1AGgAekHqgEFMC4yLjO4AQPIAQD4AQGYAgagArIhqAIUwgIHECMY6gIYJ8ICEBAAGAMYjwEY6gIYtALYAQHCAhAQLhgDGI8BGOoCGLQC2AEBwgIEECMYJ8ICCxAAGIAEGLEDGIMBwgILEC4YgAQYxwEYrwHCAggQLhiABBixA5gDC_EFMDCINXuV9e6IBgG6BgYIARABGAqSBwkxLjAuNC45LTGgB7InsgcDMi00uAfNBsIHBzAuMS40LjHIByCACAE&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:56"
+    },
+    {
+      "url": "https://www.coursenet.lk/institute/1092/ocean-university-of-sri-lanka",
+      "prediction": "BENIGN",
+      "confidence": 28.3,
+      "source": "model",
+      "timestamp": "2026-07-15 05:24:53"
+    },
+    {
+      "url": "https://www.google.com/search?q=ocean+university&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnsi85YDX4-cddpNs95l5YDC_kmpAw%3A1784093056633&ei=gBlXauGVJoCRnesPqfCxsQc&gs_ssp=eJzj4tVP1zc0zEiySMrILYo3YPQSyE9OTcxTKM3LLEstKs4sqQQAsQELXA&oq=ocea&gs_lp=Egxnd3Mtd2l6LXNlcnAiBG9jZWEqAggCMgoQABiABBiKBRhDMg0QABiABBiKBRhDGLEDMggQLhixAxiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyFxAuGLEDGIAEGJcFGNwEGN4EGOAE2AEBSK0uUJYIWL0TcAJ4AJABAJgB1AGgAekHqgEFMC4yLjO4AQPIAQD4AQGYAgagArIhqAIUwgIHECMY6gIYJ8ICEBAAGAMYjwEY6gIYtALYAQHCAhAQLhgDGI8BGOoCGLQC2AEBwgIEECMYJ8ICCxAAGIAEGLEDGIMBwgILEC4YgAQYxwEYrwHCAggQLhiABBixA5gDC_EFMDCINXuV9e6IBgG6BgYIARABGAqSBwkxLjAuNC45LTGgB7InsgcDMi00uAfNBsIHBzAuMS40LjHIByCACAE&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:46"
+    },
+    {
+      "url": "https://ocu.ac.lk/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:40"
+    },
+    {
+      "url": "https://ocu.ac.lk/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:39"
+    },
+    {
+      "url": "https://www.google.com/search?q=ocean+university&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnsi85YDX4-cddpNs95l5YDC_kmpAw%3A1784093056633&ei=gBlXauGVJoCRnesPqfCxsQc&gs_ssp=eJzj4tVP1zc0zEiySMrILYo3YPQSyE9OTcxTKM3LLEstKs4sqQQAsQELXA&oq=ocea&gs_lp=Egxnd3Mtd2l6LXNlcnAiBG9jZWEqAggCMgoQABiABBiKBRhDMg0QABiABBiKBRhDGLEDMggQLhixAxiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyFxAuGLEDGIAEGJcFGNwEGN4EGOAE2AEBSK0uUJYIWL0TcAJ4AJABAJgB1AGgAekHqgEFMC4yLjO4AQPIAQD4AQGYAgagArIhqAIUwgIHECMY6gIYJ8ICEBAAGAMYjwEY6gIYtALYAQHCAhAQLhgDGI8BGOoCGLQC2AEBwgIEECMYJ8ICCxAAGIAEGLEDGIMBwgILEC4YgAQYxwEYrwHCAggQLhiABBixA5gDC_EFMDCINXuV9e6IBgG6BgYIARABGAqSBwkxLjAuNC45LTGgB7InsgcDMi00uAfNBsIHBzAuMS40LjHIByCACAE&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:37"
+    },
+    {
+      "url": "https://www.google.com/search?q=getintopc&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuS3zOC9RO7f3joY7BA4smr5bTNfw%3A1784093051189&source=hp&ei=exlXaoKrCZTR1sQPncXnsAs&iflsig=ABILxe8AAAAAalcnizQXWF0KuuHe144K1tbgwnRsFzao&ved=0ahUKEwjC1L3E-NOVAxWUqJUCHZ3iGbYQ4dUDCCk&uact=5&oq=getintopc&gs_lp=Egdnd3Mtd2l6IglnZXRpbnRvcGNIwx9QAFibHnAAeACQAQGYAYYDoAGMDqoBBzAuNS4yLjG4AQPIAQD4AQGYAgSgAvcGwgIEECMYJ8ICFhAuGIAEGIoFGEMYsQMYgwEYxwEY0QPCAg0QABiABBiKBRhDGLEDwgIKEAAYgAQYigUYQ8ICCxAAGIAEGLEDGIMBwgIKEC4YgAQYigUYQ8ICDRAuGEMYsQMYgAQYigXCAggQABiABBixA8ICBRAAGIAEwgIOEC4YgAQYsQMYxwEY0QOYAwCSBwUwLjEuM6AHmTGyBwUwLjEuM7gH9wbCBwcwLjEuMi4xyAcQgAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:27"
+    },
+    {
+      "url": "https://getintopc.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:19"
+    },
+    {
+      "url": "https://www.google.com/search?q=getintopc&sca_esv=9b7ae9e438b46689&sxsrf=APpeQnuS3zOC9RO7f3joY7BA4smr5bTNfw%3A1784093051189&source=hp&ei=exlXaoKrCZTR1sQPncXnsAs&iflsig=ABILxe8AAAAAalcnizQXWF0KuuHe144K1tbgwnRsFzao&ved=0ahUKEwjC1L3E-NOVAxWUqJUCHZ3iGbYQ4dUDCCk&uact=5&oq=getintopc&gs_lp=Egdnd3Mtd2l6IglnZXRpbnRvcGNIwx9QAFibHnAAeACQAQGYAYYDoAGMDqoBBzAuNS4yLjG4AQPIAQD4AQGYAgSgAvcGwgIEECMYJ8ICFhAuGIAEGIoFGEMYsQMYgwEYxwEY0QPCAg0QABiABBiKBRhDGLEDwgIKEAAYgAQYigUYQ8ICCxAAGIAEGLEDGIMBwgIKEC4YgAQYigUYQ8ICDRAuGEMYsQMYgAQYigXCAggQABiABBixA8ICBRAAGIAEwgIOEC4YgAQYsQMYxwEY0QOYAwCSBwUwLjEuM6AHmTGyBwUwLjEuM7gH9wbCBwcwLjEuMi4xyAcQgAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:17"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:24:12"
+    },
+    {
+      "url": "https://www.1tamilmv.reisen/",
+      "prediction": "MALICIOUS",
+      "confidence": 88.3,
+      "source": "model",
+      "timestamp": "2026-07-15 05:23:57"
+    },
+    {
+      "url": "https://www.google.com/search?q=1tamilmv&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnu-fgcK0AMuzAITmM9iiMpEZx0W5A%3A1784092992483&ei=QBlXatGCHfCcseMP5NaK8Qs&oq=1ta0&gs_lp=Egxnd3Mtd2l6LXNlcnAiBDF0YTAqAggAMgQQIxgnMgUQABiABDIFEAAYgAQyBxAAGIAEGApIqxpQ8whYpBhwAngAkAEAmAGJAqABiwiqAQUwLjQuMbgBA8gBAPgBAZgCBaAC5wSoAhTCAgcQIxiwAxgnwgIKEAAYRxjWBBiwA8ICDRAAGIAEGIoFGEMYsAPCAhcQLhjcBhi4BhjaBhjYAhjIAxiwA9gBAcICBxAjGOoCGCfCAhYQLhiABBiKBRhDGOcGGOoCGLQC2AEBwgIWEAAYgAQYigUYQxjnBhjqAhi0AtgBAcICCxAAGIAEGIoFGJECwgIUEC4YxwEYkQIYsQMY0QMYgAQYigXCAgsQABiABBixAxiDAcICCBAAGIAEGLEDwgIKEAAYgAQYigUYQ5gDB_EFrUWe-eH7DoKIBgGQBhS6BgYIARABGBmSBwUyLjEuMqAHoyyyBwUwLjEuMrgH1wTCBwUwLjEuNMgHGIAIAQ&sclient=gws-wiz-serp",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:54"
+    },
+    {
+      "url": "https://www.google.com/search?q=fifa&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnsRgfe_LdupZkPfp2pMeC6nwKWCIQ%3A1784092986067&source=hp&ei=OhlXapLPAf2bseMP9a6skA8&iflsig=ABILxe8AAAAAalcnSvaU5jvDrwtId9GvHYnnRk8vr99R&oq=&gs_lp=Egdnd3Mtd2l6IgAqAggGMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnSOElUABYAHABeACQAQCYAQCgAQCqAQC4AQHIAQCYAgGgAguoAgqYAwvxBQqqvB1nM0BOkgcBMaAHALIHALgHAMIHAzMtMcgHCIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:49"
+    },
+    {
+      "url": "https://www.fifa.gg/",
+      "prediction": "BENIGN",
+      "confidence": 8.2,
+      "source": "model",
+      "timestamp": "2026-07-15 05:23:45"
+    },
+    {
+      "url": "https://www.fifa.gg/index.html",
+      "prediction": "BENIGN",
+      "confidence": 9.3,
+      "source": "model",
+      "timestamp": "2026-07-15 05:23:42"
+    },
+    {
+      "url": "https://www.google.com/search?q=fifa&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnsRgfe_LdupZkPfp2pMeC6nwKWCIQ%3A1784092986067&source=hp&ei=OhlXapLPAf2bseMP9a6skA8&iflsig=ABILxe8AAAAAalcnSvaU5jvDrwtId9GvHYnnRk8vr99R&oq=&gs_lp=Egdnd3Mtd2l6IgAqAggGMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnSOElUABYAHABeACQAQCYAQCgAQCqAQC4AQHIAQCYAgGgAguoAgqYAwvxBQqqvB1nM0BOkgcBMaAHALIHALgHAMIHAzMtMcgHCIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:25"
+    },
+    {
+      "url": "https://www.fifa.com/en",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:22"
+    },
+    {
+      "url": "https://www.fifa.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:16"
+    },
+    {
+      "url": "https://www.google.com/search?q=fifa&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnsRgfe_LdupZkPfp2pMeC6nwKWCIQ%3A1784092986067&source=hp&ei=OhlXapLPAf2bseMP9a6skA8&iflsig=ABILxe8AAAAAalcnSvaU5jvDrwtId9GvHYnnRk8vr99R&oq=&gs_lp=Egdnd3Mtd2l6IgAqAggGMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnMgcQIxjqAhgnSOElUABYAHABeACQAQCYAQCgAQCqAQC4AQHIAQCYAgGgAguoAgqYAwvxBQqqvB1nM0BOkgcBMaAHALIHALgHAMIHAzMtMcgHCIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:13"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:23:07"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "BENIGN",
+      "confidence": 29.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:22:56"
+    },
+    {
+      "url": "https://www.google.com/search?q=easeat.lk&oq=easea&gs_lcrp=EgZjaHJvbWUqBwgCEAAYgAQyBggAEEUYOTIOCAEQABgKGAsYsQMYgAQyBwgCEAAYgAQyDggDEAAYChgLGLEDGIAEMhEIBBAuGAoYCxjHARjRAxiABDIRCAUQLhgKGAsYxwEY0QMYgAQyCwgGEAAYChgLGIAEMgsIBxAAGAoYCxiABDILCAgQABgKGAsYgAQyBggJEC4YQNIBCDQ2MTRqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:22:54"
+    },
+    {
+      "url": "https://www.google.com/search?q=easeat.lk&oq=easea&sourceid=chrome&ie=UTF-8",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:22:54"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "MALICIOUS",
+      "confidence": 83.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:15:57"
+    },
+    {
+      "url": "https://www.google.com/search?q=eseat+lk&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnul2GWLcbHhp8hzlGEo9oGwB603ig%3A1784092549411&source=hp&ei=hRdXapjaFu6NseMPppCmkAY&iflsig=ABILxe8AAAAAalcllZ0c6QX2zQusK2RX3T9pv7oh30N8&oq=easea&gs_lp=Egdnd3Mtd2l6IgVlYXNlYSoCCAIyDBAAGIAEGAoYCxixAzIJEAAYgAQYChgLMgwQABiABBgKGAsYsQMyDxAuGIAEGAoYCxjHARjRAzIPEC4YgAQYChgLGMcBGNEDMgkQABiABBgKGAsyCRAAGIAEGAoYCzIJEAAYgAQYChgLMgUQABiABDIHEAAYgAQYCkjpFVAAWNEIcAB4AJABAJgB5QKgAa0LqgEFMi0zLjK4AQPIAQD4AQGYAgWgAtQLwgIEECMYJ8ICChAAGIAEGIoFGEPCAg4QABiABBiKBRixAxiDAcICCxAAGIAEGLEDGIMBwgILEC4YgAQYigUYkQLCAgsQABiABBiKBRiRAsICDhAuGIAEGIoFGJECGLEDwgIIEC4YgAQYsQPCAgsQABiABBiKBRixA8ICCBAAGIAEGLEDwgIQEC4YgAQYigUYQxjHARjRA5gDAJIHBTItMy4yoAf7MLIHBTItMy4yuAfUC8IHBzAuMS4zLjHIBx6ACAE&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:15:54"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:15:50"
+    },
+    {
+      "url": "https://exam.uwu.ac.lk/ug/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:11:02"
+    },
+    {
+      "url": "https://www.google.com/search?q=exam+portal+uwu+&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnvXdpcnROJ7JJSI6qdTMkIUGxwN0g%3A1784092250155&source=hp&ei=WhZXaom6B--5seMP6_P66Ak&iflsig=ABILxe8AAAAAalckaqtNES9N6erjBBTV6lCro9bCO9YW&ved=0ahUKEwiJz8LG9dOVAxXvXGwGHeu5Hp0Q4dUDCCk&uact=5&oq=exam+portal+uwu+&gs_lp=Egdnd3Mtd2l6IhBleGFtIHBvcnRhbCB1d3UgMgUQABiABDILEAAYgAQYigUYhgMyCxAAGIAEGIoFGIYDMgsQABiABBiKBRiGAzIFEAAY7wUyCBAAGIAEGKIESKA-UABY2DxwAngAkAEAmAGmAqAB_hqqAQYwLjEwLje4AQPIAQD4AQGYAhOgAs0bwgIEECMYJ8ICChAjGJ4GGPAFGCfCAhAQABiABBiKBRhDGLEDGIMBwgILEC4YgAQYxwEY0QPCAg4QABiABBiKBRixAxiDAcICCBAAGIAEGLEDwgILEAAYgAQYigUYkQLCAg4QABiABBiKBRiRAhixA8ICCxAAGIAEGLEDGIMBwgINEAAYgAQYigUYQxixA8ICBhAAGBYYHpgDAJIHBTIuOS44oAeKVrIHBTAuOS44uAfFG8IHCDAuMTUuMy4xyAc2gAgB&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:11:00"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:10:51"
+    },
+    {
+      "url": "https://sltb.eseat.lk/",
+      "prediction": "MALICIOUS",
+      "confidence": 83.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:10:27"
+    },
+    {
+      "url": "https://www.google.com/search?q=eseat+sltb&sca_esv=59f6b41efde9dea6&sxsrf=APpeQnuRmkIdpOA6fRZbDDT-MniVvqQ0dw%3A1784092212487&source=hp&ei=NBZXarmAG9eXwcsP5P_KgAg&iflsig=ABILxe8AAAAAalckRHz9A_EmdWyXzHjENGLJUs2niHpV&oq=eseat+&gs_lp=Egdnd3Mtd2l6IgZlc2VhdCAqAggAMgQQIxgnMggQABiABBixAzIHEAAYgAQYCjIIEAAYgAQYywEyDRAuGIAEGMcBGNEDGAoyBxAAGIAEGAoyBxAAGIAEGAoyBxAAGIAEGAoyBRAAGIAEMggQABiABBjLAUj5QVAAWMI2cAh4AJABAJgB4AGgAY4MqgEFMC42LjK4AQPIAQD4AQGYAhCgAt4MqAIKwgIKECMYngYY8AUYJ8ICDhAAGIAEGIoFGLEDGIMBwgILEAAYgAQYsQMYgwHCAggQLhixAxiABMICBRAuGIAEwgIEEAAYA8ICERAuGIAEGLEDGIMBGMcBGNEDwgILEC4YgAQYxwEYrwHCAg8QABiABBgKGAsYsQMYgwHCAgkQABiABBgKGAvCAgcQIxjqAhgnwgIHEC4Y6gIYJ8ICCxAuGIAEGMcBGNEDwgIHEC4YgAQYCpgDA_EFpYCAfIM5ww6SBwU4LjUuM6AHqkqyBwUwLjUuM7gHugzCBwgwLjUuMTAuMcgHPIAIAQ&sclient=gws-wiz",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:10:23"
+    },
+    {
+      "url": "https://google.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:10:13"
+    },
+    {
+      "url": "http://xn--pypal-4ve.com/login",
+      "prediction": "MALICIOUS",
+      "confidence": 86.5,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:54"
+    },
+    {
+      "url": "https://idx.one/v0/direct?sourceId=4gz2rakv&subId=https%3a%2f%2fwww.ptl.com%2f&subId2=156074.16076.1576868FOF43122174601046965&u=https%3a%2f%2ffreedom.to%2f",
+      "prediction": "MALICIOUS",
+      "confidence": 81.2,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:46"
+    },
+    {
+      "url": "https://idx.one/v0/direct?sourceId=4gz2rakv&subId=https%3a%2f%2fwww.ptl.com%2f&subId2=156074.16076.1576868FOF43122174601046965&u=https%3a%2f%2ffreedom.to%2f",
+      "prediction": "MALICIOUS",
+      "confidence": 81.2,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:38"
+    },
+    {
+      "url": "http://q1.quotes.com/59f487ec-800b-11f1-aa02-cd72825e7439",
+      "prediction": "BENIGN",
+      "confidence": 11.2,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:29"
+    },
+    {
+      "url": "http://xn--googl-fsa.com/",
+      "prediction": "BENIGN",
+      "confidence": 9.8,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:29"
+    },
+    {
+      "url": "http://xn--pypal-4ve.com/signin",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:09:19"
+    },
+    {
+      "url": "https://www.shodan.io/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:09:13"
+    },
+    {
+      "url": "https://shodan.io/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:09:11"
+    },
+    {
+      "url": "https://www.virustotal.com/gui/home/upload",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:09:07"
+    },
+    {
+      "url": "https://virustotal.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:09:05"
+    },
+    {
+      "url": "https://haveibeenpwned.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:59"
+    },
+    {
+      "url": "https://github.com/user/repo/blob/main/src/components/App.jsx",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:48"
+    },
+    {
+      "url": "https://www.amazon.co.uk/dp/B08N5WRWNW?ref=ppx_yo_dt_b_asin_title",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:46"
+    },
+    {
+      "url": "https://dev.twitter.com/rest/public",
+      "prediction": "BENIGN",
+      "confidence": 25.6,
+      "source": "model",
+      "timestamp": "2026-07-15 05:08:41"
+    },
+    {
+      "url": "http://example.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:40"
+    },
+    {
+      "url": "http://httpforever.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:40"
+    },
+    {
+      "url": "http://lushbrightwholeplay.neverssl.com/online",
+      "prediction": "BENIGN",
+      "confidence": 7.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:08:35"
+    },
+    {
+      "url": "http://neverssl.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:34"
+    },
+    {
+      "url": "https://developer.twitter.com/",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:27"
+    },
+    {
+      "url": "https://cloud.google.com/storage/docs",
+      "prediction": "BENIGN",
+      "confidence": 26.8,
+      "source": "model",
+      "timestamp": "2026-07-15 05:08:23"
+    },
+    {
+      "url": "https://aws.amazon.com/ec2/pricing/",
+      "prediction": "BENIGN",
+      "confidence": 26.7,
+      "source": "model",
+      "timestamp": "2026-07-15 05:08:21"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:20"
+    },
+    {
+      "url": "https://docs.djangoproject.com/en/4.2/topics/security/",
+      "prediction": "BENIGN",
+      "confidence": 25.3,
+      "source": "model",
+      "timestamp": "2026-07-15 05:08:17"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Phishing",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:10"
+    },
+    {
+      "url": "https://wikipedia.org/wiki/Phishing",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:08:08"
+    },
+    {
+      "url": "https://bit.ly/3xK9mNp",
+      "prediction": "BENIGN",
+      "confidence": 29.9,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:58"
+    },
+    {
+      "url": "http://bit.ly/3xK9mNp",
+      "prediction": "BENIGN",
+      "confidence": 29.6,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:57"
+    },
+    {
+      "url": "http://10.0.0.1/banking/verify",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:36"
+    },
+    {
+      "url": "http://update-required.ml/patch.msi",
+      "prediction": "MALICIOUS",
+      "confidence": 96.4,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:31"
+    },
+    {
+      "url": "http://free-download.tk/setup.scr",
+      "prediction": "MALICIOUS",
+      "confidence": 95.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:29"
+    },
+    {
+      "url": "http://microsoft-alert.support/windows/virus-detected.exe",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:29",
+      "brand": "Microsoft"
+    },
+    {
+      "url": "http://192.168.1.1/login/secure/account",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:07:03"
+    },
+    {
+      "url": "http://192.168.1.1/paypal/login",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:06:19"
+    },
+    {
+      "url": "http://185.220.101.45/malware/payload.exe",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:06:14"
+    },
+    {
+      "url": "http://free-iphone-winner.xyz/claim/prize/now",
+      "prediction": "MALICIOUS",
+      "confidence": 85.4,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:50"
+    },
+    {
+      "url": "http://secure-banking-update.tk/account/verify.php",
+      "prediction": "MALICIOUS",
+      "confidence": 97.6,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:42"
+    },
+    {
+      "url": "http://paypal.suspicious-login.com/verify",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:36",
+      "brand": "PayPal"
+    },
+    {
+      "url": "http://1nstagram.cf/login",
+      "prediction": "MALICIOUS",
+      "confidence": 97.4,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:30",
+      "brand": "Instagram"
+    },
+    {
+      "url": "http://1nstagram.cf/login",
+      "prediction": "MALICIOUS",
+      "confidence": 97.4,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:13",
+      "brand": "Instagram"
+    },
+    {
+      "url": "http://faceb00k.gq/checkpoint",
+      "prediction": "MALICIOUS",
+      "confidence": 95.5,
+      "source": "model",
+      "timestamp": "2026-07-15 05:05:05",
+      "brand": "Facebook"
+    },
+    {
+      "url": "http://paypa1.tk/secure",
+      "prediction": "MALICIOUS",
+      "confidence": 97.6,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:57",
+      "brand": "PayPal"
+    },
+    {
+      "url": "http://g00gle.com/login",
+      "prediction": "MALICIOUS",
+      "confidence": 85.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:52",
+      "brand": "Google"
+    },
+    {
+      "url": "http://testsafebrowsing.appspot.com/s/malware.html",
+      "prediction": "MALICIOUS",
+      "confidence": 100.0,
+      "source": "google_safe_browsing",
+      "timestamp": "2026-07-15 05:04:41"
+    },
+    {
+      "url": "http://testsafebrowsing.appspot.com/s/phishing.html",
+      "prediction": "MALICIOUS",
+      "confidence": 100.0,
+      "source": "google_safe_browsing",
+      "timestamp": "2026-07-15 05:04:32"
+    },
+    {
+      "url": "http://login.google.com.evil.xyz/lander",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:17",
+      "brand": "Google"
+    },
+    {
+      "url": "http://login.google.com.evil.xyz/steal",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:17",
+      "brand": "Google"
+    },
+    {
+      "url": "http://secure.google.com.phishing.ru/",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:11",
+      "brand": "Google"
+    },
+    {
+      "url": "http://secure.google.com.phishing.ru/login",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:04:09",
+      "brand": "Google"
+    },
+    {
+      "url": "http://paypal.com.verify-now.net/login",
+      "prediction": "MALICIOUS",
+      "confidence": 86.7,
+      "source": "model",
+      "timestamp": "2026-07-15 05:03:53",
+      "brand": "PayPal"
+    },
+    {
+      "url": "http://google.com.evil.tk/steal",
+      "prediction": "MALICIOUS",
+      "confidence": 90.0,
+      "source": "model",
+      "timestamp": "2026-07-15 05:03:36",
+      "brand": "Google"
+    },
+    {
+      "url": "https://docs.python.org/3/library/os.html",
+      "prediction": "BENIGN",
+      "confidence": 13.1,
+      "source": "model",
+      "timestamp": "2026-07-15 05:03:24"
+    },
+    {
+      "url": "https://claude.ai/chat/040ef779-9a38-479b-969a-b0c0c5905917",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:03:19"
+    },
+    {
+      "url": "https://claude.ai/chat/040ef779-9a38-479b-969a-b0c0c5905917",
+      "prediction": "BENIGN",
+      "confidence": 100.0,
+      "source": "whitelist",
+      "timestamp": "2026-07-15 05:03:17"
+    },
     {
       "url": "https://microsoft.com/",
       "prediction": "BENIGN",

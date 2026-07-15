@@ -872,19 +872,27 @@ class URLClassifier:
                     "domain_age": "skipped_ip",
                 }
 
-            # FIX 4: reduce confidence for clean HTTP sites
-            if https_val == 0.0 and proba < 0.80:
-                other_flags = [
-                    "brand_mismatch", "sus_words", "brand_in_domain",
-                    "risky_tld", "shortened", "ip_flag", "puny",
-                    "leet_in_domain", "leet_brand_score",
-                    "brand_hyphen_suspicious", "susp_ext",
-                    "suspicious_port", "has_redirect",
-                    "double_slash_in_path", "abnormal_subdomain",
-                    "http_no_brand_no_age",
-                ]
-                if all(raw[_FEAT_IDX.get(f, -1)] == 0.0 for f in other_flags):
-                    proba *= 0.55
+            # FIX 4 (extended): reduce confidence for clean sites — HTTP or HTTPS —
+            # when every heuristic red-flag is 0 and the score is being driven mainly
+            # by TF-IDF noise rather than real signals.
+            other_flags = [
+                "brand_mismatch", "sus_words", "brand_in_domain",
+                "risky_tld", "shortened", "ip_flag", "puny",
+                "leet_in_domain", "leet_brand_score",
+                "brand_hyphen_suspicious", "susp_ext",
+                "suspicious_port", "has_redirect",
+                "double_slash_in_path", "abnormal_subdomain",
+                "http_no_brand_no_age",
+            ]
+            is_clean = all(raw[_FEAT_IDX.get(f, -1)] == 0.0 for f in other_flags)
+
+            if is_clean and proba < 0.90:
+                if https_val == 0.0:
+                    proba *= 0.55       # HTTP clean site — moderate dampening
+                else:
+                    proba *= 0.35       # HTTPS clean site — stronger dampening, more trustworthy
+
+
 
             # FIX 7: domain age adjustment (non-override URLs only)
             domain = self._registered_domain(url)
@@ -1042,7 +1050,7 @@ class URLClassifier:
                 data_row     = fv,
                 predict_fn   = self._lime_predict_fn,
                 num_features = num_features,
-                top_labels   = 1,
+                 labels       = (1,),
             )
 
             explanation, reasons, seen = [], [], set()
