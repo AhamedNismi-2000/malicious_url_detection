@@ -7,9 +7,8 @@ stats.json/
 
 # Virtual environment
 venv/
-env/
 .venv/
-
+.
 # VS Code settings
 .vscode/
 
@@ -32,3 +31,6 @@ metrics/
 error_analysis/
 **/stats.json
 app/stats.json
+
+# Environment variables
+.env
