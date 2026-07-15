@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+stats.json/
 
 # Virtual environment
 venv/
@@ -29,4 +30,5 @@ Thumbs.db
 models/
 metrics/
 error_analysis/
-.env
+**/stats.json
+app/stats.json
