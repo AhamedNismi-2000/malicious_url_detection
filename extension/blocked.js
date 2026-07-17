@@ -42,9 +42,38 @@ function loadBlockData() {
   });
 }
 
+// ── Voice alert (Web Speech API) ────────────────────────────────────────────
+// Respects the user's "voiceAlertsEnabled" setting (default: on).
+function speakWarning(data) {
+  if (!("speechSynthesis" in window)) return;
+
+  chrome.storage.sync.get({ voiceAlertsEnabled: true }, function (s) {
+    if (!s.voiceAlertsEnabled) return;
+
+    let message = "Warning. This website has been identified as malicious and blocked.";
+    if (data.brand) {
+      message = `Warning. This site is impersonating ${data.brand} and has been blocked.`;
+    }
+
+    try {
+      speechSynthesis.cancel(); // avoid overlapping utterances on repeat blocks
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.rate   = 1.0;
+      utterance.pitch  = 1.0;
+      utterance.volume = 0.8;
+      speechSynthesis.speak(utterance);
+    } catch (_) {
+      // Speech synthesis unavailable or blocked — fail silently,
+      // the visual warning is already sufficient.
+    }
+  });
+}
+
 function renderData(data) {
   document.getElementById("loading-state").style.display = "none";
   document.getElementById("content").style.display       = "block";
+
+  speakWarning(data);
 
   document.getElementById("conf-pct").textContent =
     (_confidence || data.confidence || 0).toFixed(1) + "%";
