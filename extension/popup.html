@@ -208,7 +208,7 @@
     #settings-panel label {
       font-size: 11px; color: var(--c-muted); display: block; margin-bottom: 4px;
     }
-    #settings-panel input {
+    #settings-panel input[type="text"] {
       width: 100%;
       background: var(--c-bg);
       border: 1px solid var(--c-border);
@@ -218,7 +218,7 @@
       padding: 6px 8px;
       outline: none;
     }
-    #settings-panel input:focus { border-color: var(--c-accent); }
+    #settings-panel input[type="text"]:focus { border-color: var(--c-accent); }
     .save-btn {
       margin-top: 8px; width: 100%;
       background: var(--c-accent); border: none;
@@ -289,8 +289,7 @@
 <div id="explain-content"></div>
 
 <!-- More Details button (shown after result loads) -->
-<button class="details-btn" id="details-btn" style="display:none;"
-        onclick="openHistory()">
+<button class="details-btn" id="details-btn" style="display:none;">
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="12" cy="12" r="10"/>
@@ -303,6 +302,12 @@
 <div id="settings-panel">
   <label for="api-url">API Base URL</label>
   <input type="text" id="api-url" placeholder="http://localhost:5000" />
+
+  <label style="display:flex; align-items:center; gap:6px; margin-top:10px; cursor:pointer;">
+    <input type="checkbox" id="voice-alerts-toggle" style="width:auto; margin:0;" />
+    <span>Voice alert on blocked sites</span>
+  </label>
+
   <button class="save-btn" id="save-settings">Save</button>
 </div>
 
