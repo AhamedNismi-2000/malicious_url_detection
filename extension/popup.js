@@ -5,6 +5,11 @@
  *   - History button uses chrome.runtime.getURL directly (no message needed)
  *   - Details button always visible after result loads
  *   - Handles blocked.html and history.html gracefully
+ *
+ * ADDED:
+ *   - Voice alert toggle (voiceAlertsEnabled) — loaded/saved via
+ *     chrome.storage.sync, read by blocked.js to decide whether to speak
+ *     the warning on blocked.html.
  */
 
 "use strict";
@@ -288,15 +293,21 @@ document.getElementById("settings-toggle").addEventListener("click", () => {
   const visible = panel.style.display === "block";
   panel.style.display = visible ? "none" : "block";
   if (!visible) {
-    chrome.storage.sync.get({ apiBase: DEFAULT_API }, (s) => {
-      document.getElementById("api-url").value = s.apiBase;
-    });
+    chrome.storage.sync.get(
+      { apiBase: DEFAULT_API, voiceAlertsEnabled: true },
+      (s) => {
+        document.getElementById("api-url").value = s.apiBase;
+        document.getElementById("voice-alerts-toggle").checked = s.voiceAlertsEnabled;
+      }
+    );
   }
 });
 
 document.getElementById("save-settings").addEventListener("click", () => {
-  const val = document.getElementById("api-url").value.trim() || DEFAULT_API;
-  chrome.storage.sync.set({ apiBase: val }, () => {
+  const val   = document.getElementById("api-url").value.trim() || DEFAULT_API;
+  const voice = document.getElementById("voice-alerts-toggle").checked;
+
+  chrome.storage.sync.set({ apiBase: val, voiceAlertsEnabled: voice }, () => {
     document.getElementById("settings-panel").style.display = "none";
     document.getElementById("main-content").innerHTML =
       '<div class="state-msg"><div class="spinner"></div>Checking URL…</div>';
