@@ -58,8 +58,8 @@ function speakWarning(data) {
     try {
       speechSynthesis.cancel(); // avoid overlapping utterances on repeat blocks
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.rate   = 1.0;
-      utterance.pitch  = 1.0;
+      utterance.rate   = 1.1;
+      utterance.pitch  = 2;
       utterance.volume = 0.8;
       speechSynthesis.speak(utterance);
     } catch (_) {
