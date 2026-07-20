@@ -37,12 +37,12 @@
     }
   ],
 
-  "web_accessible_resources": [
-    {
-      "resources": ["blocked.html", "history.html"],
-      "matches"  : ["<all_urls>"]
-    }
-  ],
+ "web_accessible_resources": [
+  {
+    "resources": ["blocked.html", "history.html", "blocked.js", "history.js", "chart.umd.min.js"],
+    "matches"  : ["<all_urls>"]
+  }
+],
 
   "icons": {
     "16": "icons/icon.png"
