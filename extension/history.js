@@ -9,20 +9,98 @@
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
+const POLL_INTERVAL_MS = 5000; // live refresh every 5s
 let _allHistory    = [];
 let _filter        = "all";
 let _apiBase       = DEFAULT_API;
+let _chart         = null;
+let _pollHandle    = null;
 
 function init() {
   try {
     chrome.storage.sync.get({ apiBase: DEFAULT_API }, function (s) {
       _apiBase = (s.apiBase || DEFAULT_API).replace(/\/$/, "");
       loadData();
+      startPolling();
     });
   } catch (e) {
     _apiBase = DEFAULT_API;
     loadData();
+    startPolling();
   }
+}
+
+function startPolling() {
+  if (_pollHandle) clearInterval(_pollHandle);
+  _pollHandle = setInterval(loadStatsAndChartOnly, POLL_INTERVAL_MS);
+}
+
+// Lightweight poll: refreshes stat cards + chart only, without re-rendering
+// the (potentially large) table or disturbing the user's current filter/search.
+async function loadStatsAndChartOnly() {
+  try {
+    const statsRes = await fetch(_apiBase + "/stats", {
+      method : "GET",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!statsRes.ok) return;
+    const stats = await statsRes.json();
+
+    document.getElementById("stat-total").textContent = stats.total     ?? 0;
+    document.getElementById("stat-mal"  ).textContent = stats.malicious ?? 0;
+    document.getElementById("stat-ben"  ).textContent = stats.benign    ?? 0;
+    document.getElementById("stat-rate" ).textContent =
+      (stats.mal_rate ?? 0).toFixed(1) + "%";
+
+    updateChart(stats.malicious ?? 0, stats.benign ?? 0);
+  } catch (_) {
+    // Silent — a failed background poll shouldn't interrupt the page.
+    // The next successful manual Refresh will surface any real connection error.
+  }
+}
+
+function initChart(malicious, benign) {
+  const ctx = document.getElementById("verdict-chart");
+  if (!ctx || typeof Chart === "undefined") return;
+
+  _chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: ["Malicious", "Benign"],
+      datasets: [{
+        data: [malicious, benign],
+        backgroundColor: ["#ef4444", "#22c55e"],
+        borderRadius: 6,
+        maxBarThickness: 64,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#e2e4ec", font: { size: 11 } },
+          grid: { display: false },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: "#6b7280", precision: 0 },
+          grid: { color: "#2a2d3a" },
+        },
+      },
+    },
+  });
+}
+
+function updateChart(malicious, benign) {
+  if (!_chart) {
+    initChart(malicious, benign);
+    return;
+  }
+  _chart.data.datasets[0].data = [malicious, benign];
+  _chart.update();
 }
 
 async function loadData() {
@@ -42,6 +120,8 @@ async function loadData() {
     document.getElementById("stat-ben"  ).textContent = stats.benign    ?? 0;
     document.getElementById("stat-rate" ).textContent =
       (stats.mal_rate ?? 0).toFixed(1) + "%";
+
+    updateChart(stats.malicious ?? 0, stats.benign ?? 0);
 
     const histRes = await fetch(_apiBase + "/history?limit=1000", {
       method : "GET",
@@ -138,6 +218,7 @@ async function clearHistory() {
       document.getElementById(id).textContent = "0";
     });
     document.getElementById("stat-rate").textContent = "0.0%";
+    updateChart(0, 0);
     renderTable([]);
   } catch (_) {
     alert("Failed to clear — is Flask running?");
@@ -157,6 +238,10 @@ document.getElementById("filter-all").addEventListener("click", function () { se
 document.getElementById("filter-mal").addEventListener("click", function () { setFilter("malicious", this); });
 document.getElementById("filter-ben").addEventListener("click", function () { setFilter("benign", this); });
 document.getElementById("search-input").addEventListener("input", applySearch);
+
+window.addEventListener("beforeunload", function () {
+  if (_pollHandle) clearInterval(_pollHandle);
+});
 
 // Boot
 init();
