@@ -31,6 +31,6 @@ metrics/
 error_analysis/
 **/stats.json
 app/stats.json
-
+app/reports.json
 # Environment variables
 .env
