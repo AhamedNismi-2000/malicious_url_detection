@@ -17,7 +17,7 @@
       --c-mal-dim : #7f1d1d;
       --c-ben     : #22c55e;
       --c-ben-dim : #14532d;
-      --c-accent  : #131d52;
+      --c-accent  : #818cf8;
       --radius    : 8px;
       --font      : "Segoe UI", system-ui, sans-serif;
     }
@@ -226,69 +226,112 @@
       margin-top: 12px;
       font-size: 12px; color: var(--c-text);
     }
-      .switch {
-        position: relative;
-        display: inline-block;
-        width: 38px;
-        height: 22px;
-        flex-shrink: 0;
-      }
-      .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-      .switch-slider {
-    position: absolute;
-    cursor: pointer;
-    inset: 0;
-    background: var( --c-mal );   /* OFF state — muted gray */
-    border-radius: 22px;
-    transition: background-color 0.2s ease;
-  }
-  .switch-slider::before {
-    content: "";
-    position: absolute;
-    height: 16px;
-    width: 16px;
-    left: 3px;
-    bottom: 3px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform 0.2s ease;
-  }
-  .switch input:checked + .switch-slider {
-    background: #22c55e;   /* ON state — matches your --ben (benign green) */
-  }
-  .switch input:checked + .switch-slider::before {
-    transform: translateX(16px);
-  }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--c-border);
+      border-radius: 22px;
+      transition: background-color 0.2s ease;
+    }
+    .switch-slider::before {
+      content: "";
+      position: absolute;
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s ease;
+    }
+    .switch input:checked + .switch-slider {
+      background: var(--c-accent);
+    }
+    .switch input:checked + .switch-slider::before {
+      transform: translateX(16px);
+    }
     .switch input:focus-visible + .switch-slider {
       outline: 2px solid var(--c-accent);
       outline-offset: 2px;
     }
 
-      .save-btn {
+    .save-btn {
       margin-top: 8px; width: 100%;
-      background: var(--c-accent);
-      border: none;
+      background: var(--c-accent); border: none;
+      border-radius: 5px; color: #fff;
+      font-size: 12px; font-weight: 600;
+      padding: 6px; cursor: pointer;
+    }
+    .save-btn:hover { filter: brightness(1.15); }
+    .save-btn:active { filter: brightness(0.9); transform: scale(0.97); }
+
+    /* Report feedback */
+    .report-link {
+      display: block;
+      text-align: center;
+      margin: 0 12px 10px;
+      font-size: 11px;
+      color: var(--c-muted);
+      background: none; border: none; cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .report-link:hover { color: var(--c-accent); }
+
+    #report-panel {
+      display: none;
+      margin: 0 12px 12px;
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    #report-panel .report-label {
+      font-size: 11px; font-weight: 600; color: var(--c-text);
+      margin-bottom: 8px;
+    }
+    #report-comment {
+      width: 100%;
+      background: var(--c-bg);
+      border: 1px solid var(--c-border);
       border-radius: 5px;
-      color: #fff;
-      font-size: 12px; 
-      font-weight: 600;
-      padding: 6px;
-      cursor: pointer;
+      color: var(--c-text);
+      font-size: 12px;
+      padding: 6px 8px;
+      outline: none;
+      resize: none;
+      font-family: var(--font);
+      min-height: 44px;
+    }
+    #report-comment:focus { border-color: var(--c-accent); }
+    .report-submit-btn {
+      margin-top: 8px; width: 100%;
+      background: var(--c-mal); border: none;
+      border-radius: 5px; color: #fff;
+      font-size: 12px; font-weight: 600;
+      padding: 6px; cursor: pointer;
       transition: filter 0.15s ease, transform 0.1s ease;
     }
-    .save-btn:hover {
-      filter: brightness(1.15);
-       background: var(--c-ben);
-       color: #000000;
+    .report-submit-btn:hover { filter: brightness(1.15); }
+    .report-submit-btn:active { filter: brightness(0.9); transform: scale(0.97); }
+    .report-confirm {
+      font-size: 11px; color: var(--c-ben);
+      text-align: center; padding: 4px 0 0;
     }
-    .save-btn:active {
-      filter: brightness(0.9);
-      transform: scale(0.97);
-    }
+
     /* Footer */
     .footer {
       padding: 6px 14px 8px;
@@ -358,6 +401,17 @@
   </svg>
   View History &amp; Statistics
 </button>
+
+<!-- Report incorrect result -->
+<button class="report-link" id="report-toggle" style="display:none;">
+  ⚑ This result looks wrong? Report it
+</button>
+<div id="report-panel">
+  <div class="report-label" id="report-label">Report this verdict</div>
+  <textarea id="report-comment" placeholder="Optional: why do you think this is wrong?"></textarea>
+  <button class="report-submit-btn" id="report-submit">Submit Report</button>
+  <div class="report-confirm" id="report-confirm" style="display:none;">✓ Thanks — report submitted</div>
+</div>
 
 <!-- Settings -->
 <div id="settings-panel">
