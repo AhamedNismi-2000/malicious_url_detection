@@ -15,6 +15,7 @@
 "use strict";
 
 const DEFAULT_API = "http://localhost:5000";
+let _currentResult = null; // tracked for the report feature
 
 async function getApiBase() {
   return new Promise((resolve) =>
@@ -129,6 +130,23 @@ function renderCard(result) {
 
   // Show details button
   document.getElementById("details-btn").style.display = "flex";
+
+  // Track current result + show report link (only for real classifications,
+  // not for whitelist/error states where "reporting" doesn't make sense)
+  _currentResult = result;
+  const reportToggle = document.getElementById("report-toggle");
+  if (result.source && result.source !== "invalid" && result.source !== "error") {
+    reportToggle.style.display = "block";
+    const isMal = result.prediction === "MALICIOUS";
+    document.getElementById("report-label").textContent = isMal
+      ? "Report as false positive (this is actually safe)"
+      : "Report as false negative (this is actually malicious)";
+  } else {
+    reportToggle.style.display = "none";
+  }
+  document.getElementById("report-panel").style.display = "none";
+  document.getElementById("report-confirm").style.display = "none";
+  document.getElementById("report-comment").value = "";
 }
 
 function renderReasons(reasons, prediction) {
@@ -322,6 +340,49 @@ document.getElementById("save-settings").addEventListener("click", () => {
 
 document.getElementById("history-btn").addEventListener("click", openHistory);
 document.getElementById("details-btn").addEventListener("click", openHistory);
+
+// ── Report feedback ──────────────────────────────────────────────────────────
+
+document.getElementById("report-toggle").addEventListener("click", () => {
+  const panel = document.getElementById("report-panel");
+  panel.style.display = panel.style.display === "block" ? "none" : "block";
+});
+
+document.getElementById("report-submit").addEventListener("click", async () => {
+  if (!_currentResult) return;
+
+  const isMal    = _currentResult.prediction === "MALICIOUS";
+  const reportType = isMal ? "false_positive" : "false_negative";
+  const comment  = document.getElementById("report-comment").value.trim();
+  const apiBase  = await getApiBase();
+  const btn      = document.getElementById("report-submit");
+
+  btn.disabled = true;
+  btn.textContent = "Submitting…";
+
+  try {
+    const res = await fetch(`${apiBase}/report`, {
+      method : "POST",
+      headers: { "Content-Type": "application/json" },
+      body   : JSON.stringify({
+        url         : _currentResult.url,
+        prediction  : _currentResult.prediction,
+        confidence  : _currentResult.confidence,
+        report_type : reportType,
+        comment     : comment,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    document.getElementById("report-comment").style.display = "none";
+    btn.style.display = "none";
+    document.getElementById("report-confirm").style.display = "block";
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Submit Report";
+    alert(`Could not submit report: ${err.message}`);
+  }
+});
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 run();
