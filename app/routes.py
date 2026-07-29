@@ -12,6 +12,8 @@ Endpoints:
   GET  /stats           — get summary statistics
   GET  /history         — get full URL history
   POST /stats/clear     — clear all history
+  POST /report          — submit a false positive / false negative report
+  GET  /reports         — list submitted reports (for developer review)
 """
 
 import json
@@ -23,10 +25,12 @@ from model_loader import classifier
 
 api = Blueprint("api", __name__)
 
-# ── Stats file path ───────────────────────────────────────────────────────────
-_APP_DIR   = os.path.dirname(os.path.abspath(__file__))
-STATS_PATH = os.path.join(_APP_DIR, "stats.json")
-_stats_lock = threading.Lock()
+# ── File paths ─────────────────────────────────────────────────────────────
+_APP_DIR     = os.path.dirname(os.path.abspath(__file__))
+STATS_PATH   = os.path.join(_APP_DIR, "stats.json")
+REPORTS_PATH = os.path.join(_APP_DIR, "reports.json")
+_stats_lock   = threading.Lock()
+_reports_lock = threading.Lock()
 
 # ── Stats helpers ─────────────────────────────────────────────────────────────
 
@@ -96,6 +100,32 @@ def _record(result: dict):
         _save_stats(data)
 
 
+# ── Reports helpers ────────────────────────────────────────────────────────
+
+def _load_reports() -> dict:
+    """Load feedback reports from disk."""
+    if os.path.exists(REPORTS_PATH):
+        try:
+            with open(REPORTS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "total"          : 0,
+        "false_positive" : 0,
+        "false_negative" : 0,
+        "reports"        : [],
+    }
+
+
+def _save_reports(data: dict):
+    try:
+        with open(REPORTS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 # ── Request helpers ───────────────────────────────────────────────────────────
 
 def _bad_request(msg: str):
@@ -135,6 +165,8 @@ def index():
             "GET  /stats"         : "Summary statistics",
             "GET  /history"       : "Full URL history",
             "POST /stats/clear"   : "Clear all history",
+            "POST /report"        : "Submit a false positive / false negative report",
+            "GET  /reports"       : "List submitted reports",
         },
     }), 200
 
@@ -231,3 +263,94 @@ def clear_stats():
     with _stats_lock:
         _save_stats({"total": 0, "malicious": 0, "benign": 0, "history": []})
     return jsonify({"status": "cleared"}), 200
+
+
+@api.route("/report", methods=["POST"])
+def submit_report():
+    """
+    POST /report
+    Submit a false positive / false negative report.
+
+    Request body:
+    {
+        "url"          : "https://example.com",   (required)
+        "prediction"   : "MALICIOUS",              (required — the verdict the model gave)
+        "confidence"   : 83.1,                      (optional)
+        "report_type"  : "false_positive",          (required — "false_positive" | "false_negative")
+        "comment"      : "This is my company site"  (optional, max 500 chars)
+    }
+    """
+    data = request.get_json(silent=True) or {}
+
+    url, err = _require_url(data)
+    if err:
+        return err
+
+    report_type = data.get("report_type", "").strip().lower()
+    if report_type not in ("false_positive", "false_negative"):
+        return _bad_request(
+            "'report_type' must be either 'false_positive' or 'false_negative'."
+        )
+
+    prediction = data.get("prediction", "UNKNOWN")
+    confidence = data.get("confidence", None)
+    comment    = str(data.get("comment", "")).strip()[:500]  # cap length
+
+    with _reports_lock:
+        reports_data = _load_reports()
+
+        entry = {
+            "url"        : url,
+            "prediction" : prediction,
+            "report_type": report_type,
+            "timestamp"  : datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "status"     : "open",   # "open" | "reviewed" | "resolved"
+        }
+        if confidence is not None:
+            try:
+                entry["confidence"] = round(float(confidence), 1)
+            except (TypeError, ValueError):
+                pass
+        if comment:
+            entry["comment"] = comment
+
+        reports_data["total"] += 1
+        if report_type == "false_positive":
+            reports_data["false_positive"] += 1
+        else:
+            reports_data["false_negative"] += 1
+
+        reports_data["reports"].insert(0, entry)
+        reports_data["reports"] = reports_data["reports"][:1000]
+
+        _save_reports(reports_data)
+
+    return jsonify({"status": "received", "report": entry}), 201
+
+
+@api.route("/reports", methods=["GET"])
+def get_reports():
+    """
+    GET /reports?limit=100&status=open|reviewed|resolved&type=false_positive|false_negative
+    Returns submitted feedback reports, for developer review.
+    """
+    limit        = min(int(request.args.get("limit", 100)), 1000)
+    status_filter = request.args.get("status", "").strip().lower()
+    type_filter   = request.args.get("type", "").strip().lower()
+
+    with _reports_lock:
+        data = _load_reports()
+
+    reports = data.get("reports", [])
+
+    if status_filter in ("open", "reviewed", "resolved"):
+        reports = [r for r in reports if r.get("status") == status_filter]
+    if type_filter in ("false_positive", "false_negative"):
+        reports = [r for r in reports if r.get("report_type") == type_filter]
+
+    return jsonify({
+        "total"          : data.get("total", 0),
+        "false_positive" : data.get("false_positive", 0),
+        "false_negative" : data.get("false_negative", 0),
+        "reports"        : reports[:limit],
+    }), 200
