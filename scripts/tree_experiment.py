@@ -79,7 +79,7 @@ plt.rcParams.update({
 })
 
 C_MAL    = "#ef4444"
-C_BEN    = "#22c55e"
+C_BEN    = "#c5ad22"
 C_ACCENT = "#818cf8"
 C_WARN   = "#f59e0b"
 C_MUTED  = "#6b7280"
