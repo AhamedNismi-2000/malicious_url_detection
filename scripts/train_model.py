@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 # ─────────────────────────── RF CONFIG ───────────────────────
 RF_PARAMS = {
-    "n_estimators"     : 300,
+    "n_estimators"     : 200,
     "max_depth"        : 25,    # change back from 20 → proven better
     "min_samples_split": 10,
     "min_samples_leaf" : 4,
