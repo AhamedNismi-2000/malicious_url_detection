@@ -228,7 +228,7 @@ _(Add your chosen license here — e.g. MIT)_
 ## Author
 
 **Ahamed Nismi**
-Final-year Computer Science undergraduate, Uva Wellassa University of Sri Lanka
+Computer Science & Technology undergraduate, Uva Wellassa University of Sri Lanka
 [GitHub](https://github.com/AhamedNismi-2000) ·
 [LinkedIn](https://linkedin.com/in/ahamednismi312) ·
 [Portfolio](https://ahamednismi-2000.github.io/nismi_portfolio/)
