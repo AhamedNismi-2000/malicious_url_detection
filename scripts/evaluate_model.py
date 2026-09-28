@@ -52,33 +52,35 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results", "plots")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # ── Style ─────────────────────────────────────────────────────────────────────
+# ── Plot style ────────────────────────────────────────────────────────────────
 plt.rcParams.update({
-    "figure.facecolor"  : "#0f1117",
-    "axes.facecolor"    : "#1a1d27",
-    "axes.edgecolor"    : "#2a2d3a",
-    "axes.labelcolor"   : "#e2e4ec",
-    "axes.titlecolor"   : "#e2e4ec",
-    "axes.grid"         : True,
-    "grid.color"        : "#2a2d3a",
-    "grid.linewidth"    : 0.8,
-    "xtick.color"       : "#6b7280",
-    "ytick.color"       : "#6b7280",
-    "text.color"        : "#e2e4ec",
-    "font.family"       : "DejaVu Sans",
-    "font.size"         : 11,
-    "axes.titlesize"    : 13,
-    "axes.labelsize"    : 11,
-    "legend.facecolor"  : "#1a1d27",
-    "legend.edgecolor"  : "#2a2d3a",
-    "legend.labelcolor" : "#e2e4ec",
-    "figure.dpi"        : 150,
+    "figure.facecolor" : "#0f1117",
+    "axes.facecolor"   : "#1a1d27",
+    "axes.edgecolor"   : "#2a2d3a",
+    "axes.labelcolor"  : "#e2e4ec",
+    "axes.titlecolor"  : "#e2e4ec",
+    "axes.grid"        : True,
+    "grid.color"       : "#2a2d3a",
+    "grid.linewidth"   : 0.8,
+    "xtick.color"      : "#6b7280",
+    "ytick.color"      : "#6b7280",
+    "text.color"       : "#e2e4ec",
+    "font.family"      : "DejaVu Sans",
+    "font.size"        : 11,
+    "axes.titlesize"   : 13,
+    "axes.labelsize"   : 11,
+    "legend.facecolor" : "#1a1d27",
+    "legend.edgecolor" : "#2a2d3a",
+    "legend.labelcolor": "#e2e4ec",
+    "figure.dpi"       : 150,
 })
 
-C_MAL    = "#ef4444"   # red   — malicious
-C_BEN    = "#22c55e"   # green — benign
-C_ACCENT = "#818cf8"   # indigo
-C_WARN   = "#f59e0b"   # amber
-C_MUTED  = "#6b7280"   # gray
+C_MAL    = "#ef4444"
+C_BEN    = "#c5ad22"
+C_ACCENT = "#818cf8"
+C_WARN   = "#f59e0b"
+C_MUTED  = "#6b7280"
+C_ORANGE = "#f97316"
 
 SAVE_DPI = 200
 
