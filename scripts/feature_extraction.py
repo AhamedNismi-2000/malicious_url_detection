@@ -28,11 +28,11 @@ Feature breakdown (total: 559):
   HTTPS context fix       :  1  (http_no_brand_no_age)
   NEW leet brand score    :  1  (leet_brand_score)  ← NEW
   ─────────────────────────
-  Heuristic subtotal      : 57  (was 56)
+  Heuristic subtotal      : 57  
   Char n-gram TF-IDF      : 300
   Word n-gram TF-IDF      : 202
   ─────────────────────────
-  TOTAL                   : 559 (was 558)
+  TOTAL                   : 559 
 
 NOTE: Because we added 1 heuristic feature, you must retrain the model.
       The saved vectorizer/scaler/model from the old 558-feature run will
