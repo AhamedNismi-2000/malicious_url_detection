@@ -666,7 +666,7 @@ def main():
 
     print(f"\nAll plots saved to: {RESULTS_DIR}")
     print(f"All tables saved to: {METRICS_DIR}")
-    print("Formats: PNG + PDF (plots), JSON + CSV + LaTeX (tables)\n")
+    print("Formats: PNG (plots), JSON + CSV + LaTeX (tables)\n")
 
 
 if __name__ == "__main__":
