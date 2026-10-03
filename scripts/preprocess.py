@@ -1,529 +1,448 @@
 #!/usr/bin/env python3
 """
-preprocessing.py
-----------------
-Loads verified research-grade datasets + synthetic typosquatting URLs.
+preprocessing.py  (v2)  -  build ONE clean, documented dataset from all raw sources
+------------------------------------------------------------------------------------
+Run from the project root (venv active):
 
-Sources:
-  Malicious:
-    Phish.csv              - PhishTank verified phishing
-    urlhaus.txt            - URLhaus malware
-    openphish.txt          - OpenPhish active phishing
-    data.csv (bad)         - faizann24 malicious URLs with paths
-    synthetic_malicious.csv- Generated typosquatting patterns
+    python scripts/preprocessing.py
+    python scripts/preprocessing.py --max-per-group 15 --out-dir data/processed
 
-  Benign:
-    data.csv (good)        - faizann24 benign URLs with real paths
-    top-1m.csv             - Tranco top domains (100k sample)
-    manual_benign          - Curated niche legitimate URLs
+Needs scripts/url_utils.py next to this file.
 
-Output:
-  data/processed/cleaned_urls.csv
-  data/processed/cleaned_urls_reference.csv
+Raw files looked for in data/raw/ (missing ones are skipped with a message):
+    Phish.csv                          PhishTank           malicious (phishing)
+    urlhaus.txt                        URLhaus             malicious (malware)
+    openphish.txt                      OpenPhish           malicious (phishing)
+    data.csv                           faizann24 (old)     good / bad
+    PhiUSIIL_Phishing_URL_Dataset.csv  PhiUSIIL            label 1=legit, 0=phish
+    phishing-links-ACTIVE.txt          Phishing.Database   malicious (phishing)
+    synthetic_malicious.csv            typosquats          malicious (synthetic)
+    top-1m.csv                         Tranco              benign (rank-bucket sample)
+    benign_crawled.csv                 your crawler        benign, column "url"
+
+Outputs
+    data/processed/cleaned_urls_v2.csv       the dataset (schema below)
+    reports/preprocessing_report.json        every count, step by step
+    reports/preprocessing_conflicts.csv      groups that carry both labels
+    data/reference/popular_domains.csv       Tranco top-N (for typosquat.py)
+
+Schema of cleaned_urls_v2.csv
+    url         canonical, scheme-less, no "www."  <- the model input
+    label       0 benign / 1 malicious
+    source      which raw file / feed
+    label_type  benign, phishing, malware, malicious, synthetic_typosquat
+    scheme      scheme observed in the source ("" = unknown; never invented)
+    host, reg_domain, suffix, group_key
+    has_path, has_query, is_ip, is_synthetic
+    url_raw     exactly as collected (debugging only)
+
+Pipeline (each step is counted per source in the report)
+    load -> canonicalize -> dedupe -> label conflicts -> per-group cap ->
+    source caps -> synthetic cap -> class matching -> final checks -> write
 """
 
+import argparse
+import json
 import os
-import re
+import sys
+from collections import Counter, OrderedDict
+
+import numpy as np
 import pandas as pd
-import tldextract
-from urllib.parse import urlparse
 
-# ---------------- PATHS ----------------
-BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW_DIR       = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
-os.makedirs(PROCESSED_DIR, exist_ok=True)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from url_utils import canonicalize                      # noqa: E402
 
-PHISH_PATH      = os.path.join(RAW_DIR, "Phish.csv")
-URLHAUS_PATH    = os.path.join(RAW_DIR, "urlhaus.txt")
-OPENPHISH_PATH  = os.path.join(RAW_DIR, "openphish.txt")
-ALEXA_PATH      = os.path.join(RAW_DIR, "top-1m.csv")
-DATA_PATH       = os.path.join(RAW_DIR, "data.csv")
-SYNTHETIC_PATH  = os.path.join(RAW_DIR, "synthetic_malicious.csv")
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(x, **_):
+        return x
 
-OUTPUT_ML        = os.path.join(PROCESSED_DIR, "cleaned_urls.csv")
-OUTPUT_REFERENCE = os.path.join(PROCESSED_DIR, "cleaned_urls_reference.csv")
+# ═════════════════════════ SETTINGS (edit here) ═════════════════════════
+CONFIG = dict(
+    SEED=42,
+    MAX_PER_GROUP=25,        # max rows per (label, group_key): kills domain dominance
+    MAX_PER_PLATFORM=400,    # max rows per (label, registered domain) for shared platforms
+                             # and big multi-owner sites (weebly, web.app, google.com...)
+    MAX_PER_IP=3,            # max rows per IP host
+    SYNTHETIC_FRACTION=0.02, # synthetic rows <= this share of the REAL malicious rows
+    IP_MAX_FRACTION=0.05,    # IP-host rows <= this share of final malicious rows
+    MATCH_COLS=["has_path", "has_query"],   # classes are matched on these
+    SOURCE_CAPS={},          # e.g. {"PhiUSIIL (legitimate)": 60000}
+    # Tranco sampling: (rank_from, rank_to, rows_to_sample). Long tail on purpose.
+    TRANCO_BUCKETS=[(1, 1_000, 1_000), (1_001, 10_000, 6_000),
+                    (10_001, 100_000, 25_000), (100_001, 1_000_000, 60_000)],
+    DROP_TRANCO_SHARED_ROOTS=True,   # drop roots like web.app / github.io from benign
+    POPULAR_REF_N=10_000,
+)
 
-SKIP_DOMAINS = {
-    "googletagmanager.com", "doubleclick.net", "googleapis.com",
-    "gstatic.com", "cloudflare.com", "akamaized.net",
-    "fastly.net", "cloudfront.net", "amazonaws.com",
-    "gtld-servers.net", "root-servers.net"
-}
-
-# ---------------- HELPERS ----------------
-def normalize_url(u: str) -> str:
-    try:
-        u = str(u).strip().lower()
-        u = re.sub(r"\s+", "", u)
-        markdown_match = re.search(r'\(https?://[^\)]+\)', u)
-        if markdown_match:
-            u = markdown_match.group(0)[1:-1]
-        if not re.match(r"https?://", u):
-            u = "http://" + u
-        if u.endswith("/") and len(u) > 8:
-            u = u[:-1]
-        return u
-    except Exception:
-        return None
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def valid_domain(url: str) -> bool:
-    try:
-        parsed   = urlparse(url)
-        if not parsed.netloc:
-            return False
-        hostname  = parsed.netloc.split(":")[0]
-        extracted = tldextract.extract(hostname)
-        return bool(extracted.domain) and bool(extracted.suffix)
-    except Exception:
-        return False
+# ═════════════════════════ funnel bookkeeping ═════════════════════════
+class Funnel:
+    """Counts rows per source after every step, plus drop reasons."""
+
+    def __init__(self) -> None:
+        self.steps: OrderedDict = OrderedDict()
+        self.reasons: Counter = Counter()
+
+    def snap(self, step: str, df: pd.DataFrame) -> None:
+        self.steps[step] = df["source"].value_counts().to_dict()
+
+    def snap_raw(self, step: str, counts: dict) -> None:
+        self.steps[step] = dict(counts)
+
+    def table(self) -> pd.DataFrame:
+        t = pd.DataFrame(self.steps).fillna(0).astype(int)
+        first, last = t.columns[0], t.columns[-1]
+        t["kept_%"] = (100 * t[last] / t[first].replace(0, np.nan)).round(1)
+        return t
 
 
-def resolve_label_conflicts(df: pd.DataFrame) -> pd.DataFrame:
-    diversity     = df.groupby("url")["label"].nunique()
-    conflict_urls = diversity[diversity > 1].index
-    n             = len(conflict_urls)
-    if n > 0:
-        print(f"  Removing {n:,} conflicting URLs")
-        df = df[~df["url"].isin(conflict_urls)]
-    return df.drop_duplicates(subset=["url"]).reset_index(drop=True)
+def say(msg: str = "") -> None:
+    print(msg, flush=True)
 
 
-def convert_labels(df: pd.DataFrame) -> pd.DataFrame:
-    mapping = {
-        "benign"             : 0,
-        "legitimate"         : 0,
-        "good"               : 0,
-        "safe"               : 0,
-        "malicious"          : 1,
-        "phishing"           : 1,
-        "malware"            : 1,
-        "defacement"         : 1,
-        "bad"                : 1,
-        "synthetic_malicious": 1,
-    }
-    df          = df.copy()
-    df["label"] = df["label"].str.lower().map(mapping)
-    before      = len(df)
-    df          = df.dropna(subset=["label"])
-    df["label"] = df["label"].astype(int)
-    removed     = before - len(df)
-    if removed > 0:
-        print(f"  Removed {removed:,} URLs with unrecognized labels")
-    return df
+# ═════════════════════════ loaders ═════════════════════════
+def load_sources(raw_dir: str, cfg: dict) -> tuple:
+    """Return (list of source dicts, tranco_frame_or_None)."""
+    out: list = []
+    rng_seed = cfg["SEED"]
 
+    def p(name):
+        return os.path.join(raw_dir, name)
 
-def clean_df(df: pd.DataFrame, name: str) -> pd.DataFrame:
-    print(f"  Cleaning {name}...")
-    df["url"] = df["url"].apply(normalize_url)
-    df        = df[df["url"].notnull()]
-    df        = df[df["url"].apply(valid_domain)]
-    df        = df.drop_duplicates(subset=["url"]).reset_index(drop=True)
-    print(f"  After cleaning: {len(df):,}")
-    return df
+    def add(name, label, ltype, urls, synthetic=False):
+        urls = pd.Series(urls).dropna().astype(str).reset_index(drop=True)
+        out.append(dict(name=name, label=label, label_type=ltype,
+                        synthetic=synthetic, urls=urls))
+        say(f"  loaded {name:<38} {len(urls):>9,} rows")
 
+    def attempt(fname, fn):
+        if not os.path.exists(p(fname)):
+            say(f"  (skip) {fname} not found")
+            return
+        try:
+            fn()
+        except Exception as exc:                                  # keep going
+            say(f"  [ERROR] {fname}: {exc}")
 
-def add_scheme(url: str) -> str:
-    u = str(url).strip()
-    if not u.startswith(("http://", "https://")):
-        return "http://" + u
-    return u
-
-
-# ---------------- LOADERS ----------------
-
-def load_phishtank() -> pd.DataFrame:
-    print("Loading Phish.csv (PhishTank)...")
-    try:
-        df = pd.read_csv(PHISH_PATH, dtype=str, low_memory=False)
+    def phishtank():
+        df = pd.read_csv(p("Phish.csv"), dtype=str, low_memory=False)
         if "verified" in df.columns:
             df = df[df["verified"].str.lower() == "yes"]
-        url_col = "url" if "url" in df.columns else df.columns[1]
-        out = pd.DataFrame({
-            "url"  : df[url_col].astype(str),
-            "label": "phishing"
-        })
-        out = out.dropna(subset=["url"])
-        print(f"  Loaded: {len(out):,}")
-        return out[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
+        col = "url" if "url" in df.columns else df.columns[1]
+        add("PhishTank", 1, "phishing", df[col])
 
+    def urlhaus():
+        df = pd.read_csv(p("urlhaus.txt"), comment="#", header=None, dtype=str,
+                         on_bad_lines="skip")
+        s = df.iloc[:, 2 if df.shape[1] >= 3 else 0].dropna().astype(str)
+        add("URLhaus", 1, "malware", s[s.str.startswith(("http://", "https://"))])
 
-def load_urlhaus() -> pd.DataFrame:
-    print("Loading urlhaus.txt...")
-    try:
-        df   = pd.read_csv(
-            URLHAUS_PATH, comment="#",
-            header=None, dtype=str,
-            on_bad_lines="skip"
-        )
-        col  = 2 if df.shape[1] >= 3 else 0
-        urls = df.iloc[:, col].dropna().astype(str)
-        urls = urls[urls.str.startswith(("http://", "https://"))]
-        out  = pd.DataFrame({"url": urls, "label": "malware"})
-        print(f"  Loaded: {len(out):,}")
-        return out[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
+    def openphish():
+        with open(p("openphish.txt"), encoding="utf-8", errors="ignore") as fh:
+            add("OpenPhish", 1, "phishing",
+                [l.strip() for l in fh if l.strip().startswith(("http://", "https://"))])
 
+    def data_csv():
+        df = pd.read_csv(p("data.csv"), dtype=str, header=None,
+                         names=["url", "label"], skiprows=1)
+        lab = df["label"].str.lower()
+        add("data.csv (bad)", 1, "malicious", df.loc[lab == "bad", "url"])
+        add("data.csv (good)", 0, "benign", df.loc[lab == "good", "url"])
 
-def load_openphish() -> pd.DataFrame:
-    print("Loading openphish.txt...")
-    try:
-        with open(OPENPHISH_PATH, encoding="utf-8", errors="ignore") as f:
-            lines = [
-                l.strip() for l in f
-                if l.strip().startswith(("http://", "https://"))
-            ]
-        out = pd.DataFrame({"url": lines, "label": "phishing"})
-        print(f"  Loaded: {len(out):,}")
-        return out[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
+    def phiusiil():
+        df = pd.read_csv(p("PhiUSIIL_Phishing_URL_Dataset.csv"), dtype=str,
+                         low_memory=False,
+                         usecols=lambda c: c.strip().lower() in ("url", "label"))
+        cols = {c.strip().lower(): c for c in df.columns}
+        lab = pd.to_numeric(df[cols["label"]], errors="coerce")
+        add("PhiUSIIL (legitimate)", 0, "benign", df.loc[lab == 1, cols["url"]])
+        add("PhiUSIIL (phishing)", 1, "phishing", df.loc[lab == 0, cols["url"]])
 
+    def phishing_db():
+        with open(p("phishing-links-ACTIVE.txt"), encoding="utf-8", errors="ignore") as fh:
+            add("Phishing.Database", 1, "phishing",
+                [l.strip() for l in fh if l.strip() and not l.startswith("#")])
 
-def load_data_csv_malicious() -> pd.DataFrame:
-    print("Loading data.csv (malicious only)...")
-    try:
-        df  = pd.read_csv(
-            DATA_PATH, dtype=str,
-            header=None, names=["url", "label"],
-            skiprows=1
-        )
-        bad = df[df["label"].str.lower() == "bad"].copy()
-        bad["label"] = "malicious"
-        bad["url"]   = bad["url"].apply(add_scheme)
-        bad          = bad.dropna(subset=["url"])
-        print(f"  Loaded: {len(bad):,}")
-        return bad[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
+    def synthetic():
+        df = pd.read_csv(p("synthetic_malicious.csv"), dtype=str)
+        add("Synthetic typosquats", 1, "synthetic_typosquat", df["url"], synthetic=True)
 
+    def crawled():
+        df = pd.read_csv(p("benign_crawled.csv"), dtype=str)
+        add("Crawled benign", 0, "benign", df["url"])
 
-def load_synthetic_malicious() -> pd.DataFrame:
-    print("Loading synthetic_malicious.csv...")
-    try:
-        df = pd.read_csv(SYNTHETIC_PATH, dtype=str)
-        df["label"] = "synthetic_malicious"
-        df = df.dropna(subset=["url"])
-        print(f"  Loaded: {len(df):,} synthetic malicious URLs")
-        return df[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
+    for fname, fn in [("Phish.csv", phishtank), ("urlhaus.txt", urlhaus),
+                      ("openphish.txt", openphish), ("data.csv", data_csv),
+                      ("PhiUSIIL_Phishing_URL_Dataset.csv", phiusiil),
+                      ("phishing-links-ACTIVE.txt", phishing_db),
+                      ("synthetic_malicious.csv", synthetic),
+                      ("benign_crawled.csv", crawled)]:
+        attempt(fname, fn)
 
-
-def load_data_csv_benign() -> pd.DataFrame:
-    print("Loading data.csv (benign only)...")
-    try:
-        df   = pd.read_csv(
-            DATA_PATH, dtype=str,
-            header=None, names=["url", "label"],
-            skiprows=1
-        )
-        good = df[df["label"].str.lower() == "good"].copy()
-        good["label"] = "benign"
-        good["url"]   = good["url"].apply(add_scheme)
-        good          = good.dropna(subset=["url"])
-        print(f"  Loaded: {len(good):,}")
-        return good[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
-
-
-def load_alexa(n: int) -> pd.DataFrame:
-    print(f"Loading top-1m.csv / Tranco (top {n:,})...")
-    try:
-        df = pd.read_csv(
-            ALEXA_PATH, dtype=str,
-            header=None, names=["rank", "domain"],
-            nrows=n
-        )
-        df["domain"] = df["domain"].str.strip().str.lower()
-        df = df[~df["domain"].isin(SKIP_DOMAINS)]
-        # FIX: use https:// without www to match real user visits
-        df["url"]    = "https://" + df["domain"]
-        df["label"]  = "benign"
-        print(f"  Loaded: {len(df):,}")
-        return df[["url", "label"]]
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        return pd.DataFrame(columns=["url", "label"])
-
-
-def load_manual_benign() -> pd.DataFrame:
-    """
-    Curated list of legitimate niche URLs that Tranco may not cover well.
-    Covers: developer tools, job boards, wallpaper sites, tech frameworks.
-    These are sites with short clean URLs that the model tends to FP on.
-    """
-    print("Loading manual benign URLs...")
-    urls = [
-        # Developer roadmaps and learning
-        "https://roadmap.sh",
-        "https://dev.to",
-        "https://freecodecamp.org",
-        "https://theodinproject.com",
-        "https://exercism.org",
-        "https://leetcode.com",
-        "https://hackerrank.com",
-        "https://codepen.io",
-        "https://replit.com",
-        "https://glitch.com",
-        "https://codesandbox.io",
-        "https://stackblitz.com",
-        "https://jsfiddle.net",
-        "https://hashnode.com",
-        "https://css-tricks.com",
-        "https://smashingmagazine.com",
-        "https://alistapart.com",
-        "https://sitepoint.com",
-        "https://scotch.io",
-        "https://digitalocean.com",
-        # Programming languages and frameworks
-        "https://rust-lang.org",
-        "https://golang.org",
-        "https://swift.org",
-        "https://kotlin.org",
-        "https://julialang.org",
-        "https://typescriptlang.org",
-        "https://reactjs.org",
-        "https://vuejs.org",
-        "https://angular.io",
-        "https://svelte.dev",
-        "https://nextjs.org",
-        "https://nuxtjs.org",
-        "https://astro.build",
-        "https://vite.dev",
-        "https://remix.run",
-        "https://laravel.com",
-        "https://symfony.com",
-        "https://djangoproject.com",
-        "https://flask.palletsprojects.com",
-        "https://fastapi.tiangolo.com",
-        "https://spring.io",
-        "https://rubyonrails.org",
-        "https://expressjs.com",
-        "https://nestjs.com",
-        "https://dotnet.microsoft.com",
-        # Dev tools and package managers
-        "https://npmjs.com",
-        "https://pypi.org",
-        "https://packagist.org",
-        "https://rubygems.org",
-        "https://crates.io",
-        "https://pub.dev",
-        "https://nuget.org",
-        "https://mvnrepository.com",
-        "https://brew.sh",
-        "https://chocolatey.org",
-        "https://webpack.js.org",
-        "https://babeljs.io",
-        "https://eslint.org",
-        "https://prettier.io",
-        "https://jestjs.io",
-        "https://vitest.dev",
-        "https://playwright.dev",
-        "https://cypress.io",
-        "https://storybook.js.org",
-        "https://tailwindcss.com",
-        # Cloud and hosting
-        "https://vercel.com",
-        "https://netlify.com",
-        "https://render.com",
-        "https://railway.app",
-        "https://fly.io",
-        "https://heroku.com",
-        "https://supabase.com",
-        "https://firebase.google.com",
-        "https://planetscale.com",
-        "https://neon.tech",
-        "https://upstash.com",
-        "https://clerk.dev",
-        "https://auth0.com",
-        "https://okta.com",
-        "https://stripe.com",
-        "https://twilio.com",
-        "https://sendgrid.com",
-        "https://mailchimp.com",
-        "https://postmarkapp.com",
-        "https://resend.com",
-        # Remote job boards
-        "https://dailyremote.com",
-        "https://jobspresso.co",
-        "https://remoteok.com",
-        "https://weworkremotely.com",
-        "https://wellfound.com",
-        "https://remote.co",
-        "https://flexjobs.com",
-        "https://himalayas.app",
-        "https://workingnomads.com",
-        "https://justremote.co",
-        "https://remoteleaf.com",
-        "https://remotive.com",
-        "https://nodesk.co",
-        # Media and wallpapers
-        "https://4kwallpapers.com",
-        "https://unsplash.com",
-        "https://pexels.com",
-        "https://pixabay.com",
-        "https://wallpapercave.com",
-        "https://hdwallpapers.in",
-        # Security and research tools
-        "https://shodan.io",
-        "https://virustotal.com",
-        "https://haveibeenpwned.com",
-        "https://portswigger.net",
-        "https://owasp.org",
-        "https://exploit-db.com",
-        "https://nvd.nist.gov",
-        "https://cve.mitre.org",
-        # Open source and docs
-        "https://opensource.org",
-        "https://gnu.org",
-        "https://fsf.org",
-        "https://apache.org",
-        "https://eclipse.org",
-        "https://linuxfoundation.org",
-        "https://kernel.org",
-        "https://debian.org",
-        "https://ubuntu.com",
-        "https://archlinux.org",
-        "https://fedoraproject.org",
-        "https://centos.org",
-        "https://opensuse.org",
-    ]
-    df = pd.DataFrame({"url": urls, "label": "benign"})
-    print(f"  Loaded: {len(df):,}")
-    return df[["url", "label"]]
-
-
-# ---------------- MAIN ----------------
-def main():
-    print("=" * 60)
-    print("PREPROCESSING — FULL VERIFIED + SYNTHETIC PIPELINE")
-    print("=" * 60)
-    print("Malicious: PhishTank + URLhaus + OpenPhish")
-    print("         + data.csv bad + synthetic typosquatting")
-    print("Benign   : data.csv good + Tranco 100k + manual curated")
-    print("=" * 60)
-
-    # Step 1 — Load all malicious
-    print("\nStep 1: Loading malicious datasets...")
-    malicious = pd.concat(
-        [
-            load_phishtank(),
-            load_urlhaus(),
-            load_openphish(),
-            load_data_csv_malicious(),
-            load_synthetic_malicious()
-        ],
-        ignore_index=True
-    )
-    malicious   = clean_df(malicious, "malicious")
-    n_malicious = len(malicious)
-    print(f"\n  Total malicious: {n_malicious:,}")
-
-    # Step 2 — Load benign
-    print(f"\nStep 2: Loading benign datasets...")
-    data_benign = load_data_csv_benign()
-    data_benign = clean_df(data_benign, "data.csv benign")
-
-    # FIX: increased from 20000 to 100000 for more diversity
-    tranco = load_alexa(n=100000)
-    tranco = clean_df(tranco, "tranco benign")
-
-    # NEW: curated niche legitimate URLs
-    manual = load_manual_benign()
-    manual = clean_df(manual, "manual benign")
-
-    benign = pd.concat(
-        [data_benign, tranco, manual],
-        ignore_index=True
-    )
-    benign = benign.drop_duplicates(
-        subset=["url"]
-    ).reset_index(drop=True)
-    print(f"\n  Total benign available: {len(benign):,}")
-
-    # Sample benign to match malicious for 1:1 balance
-    if len(benign) > n_malicious:
-        benign = benign.sample(
-            n=n_malicious, random_state=42
-        ).reset_index(drop=True)
-        print(f"  Sampled benign to: {len(benign):,} (1:1 balance)")
+    tranco = None
+    if os.path.exists(p("top-1m.csv")):
+        try:
+            tr = pd.read_csv(p("top-1m.csv"), dtype=str, header=None,
+                             names=["rank", "domain"])
+            tr["rank"] = pd.to_numeric(tr["rank"], errors="coerce")
+            tr["domain"] = tr["domain"].str.strip().str.lower()
+            tr = tr.dropna()
+            tranco = tr
+            parts = []
+            for lo, hi, n in cfg["TRANCO_BUCKETS"]:
+                b = tr[(tr["rank"] >= lo) & (tr["rank"] <= hi)]
+                parts.append(b.sample(min(n, len(b)), random_state=rng_seed))
+            sample = pd.concat(parts)
+            add("Tranco (rank-bucket sample)", 0, "benign", sample["domain"])
+        except Exception as exc:
+            say(f"  [ERROR] top-1m.csv: {exc}")
     else:
-        print(f"  Using all {len(benign):,} benign URLs")
+        say("  (skip) top-1m.csv not found")
+    return out, tranco
 
-    print(f"\n  Final malicious: {n_malicious:,}")
-    print(f"  Final benign   : {len(benign):,}")
 
-    # Step 3 — Combine
-    print("\nStep 3: Combining...")
-    combined = pd.concat([malicious, benign], ignore_index=True)
-    print(f"  Combined total: {len(combined):,}")
+# ═════════════════════════ steps ═════════════════════════
+def canonicalize_all(sources: list, funnel: Funnel) -> pd.DataFrame:
+    rows: list = []
+    for src in sources:
+        for raw in tqdm(src["urls"], desc=f"canon {src['name'][:22]}", leave=False):
+            c, reason = canonicalize(raw)
+            if c is None:
+                funnel.reasons[(src["name"], reason)] += 1
+                continue
+            c.update(source=src["name"], label=src["label"],
+                     label_type=src["label_type"], is_synthetic=src["synthetic"],
+                     url_raw=str(raw).replace("\n", " ").replace("\r", " "))
+            rows.append(c)
+    df = pd.DataFrame(rows)
+    df["label"] = df["label"].astype(int)
+    return df
 
-    # Step 4 — Resolve conflicts
-    print("\nStep 4: Resolving label conflicts...")
-    combined = resolve_label_conflicts(combined)
-    print(f"  After conflicts: {len(combined):,}")
 
-    # Step 5 — Reference file (string labels)
-    reference_df = combined.copy()
+def dedupe_and_conflicts(df: pd.DataFrame, funnel: Funnel, rng_seed: int) -> tuple:
+    df = df.sample(frac=1, random_state=rng_seed).reset_index(drop=True)
+    df["_k"] = df["url"].str.lower()
+    n_lab = df.groupby("_k")["label"].transform("nunique")
+    n_conflict = int((n_lab > 1).sum())
+    df = df[n_lab == 1]
+    funnel.snap("no_url_label_conflict", df)
+    n_before = len(df)
+    df = df.drop_duplicates(subset="_k").drop(columns="_k")
+    funnel.snap("deduplicated", df)
+    return df.reset_index(drop=True), n_conflict, n_before - len(df)
 
-    # Step 6 — Convert labels to numeric
-    print("\nStep 5: Converting labels to numeric...")
-    ml_df = convert_labels(combined)
 
-    # Step 7 — Shuffle
-    ml_df = ml_df.sample(
-        frac=1, random_state=42
-    ).reset_index(drop=True)
-    reference_df = reference_df.sample(
-        frac=1, random_state=42
-    ).reset_index(drop=True)
+def group_conflicts(df: pd.DataFrame) -> pd.DataFrame:
+    c = (df.groupby(["group_key", "label"]).size().unstack(fill_value=0)
+           .rename(columns={0: "n_benign", 1: "n_malicious"}))
+    for col in ("n_benign", "n_malicious"):
+        if col not in c.columns:
+            c[col] = 0
+    c = c[(c["n_benign"] > 0) & (c["n_malicious"] > 0)].copy()
+    c["total"] = c["n_benign"] + c["n_malicious"]
+    return c.sort_values("total", ascending=False)
 
-    # Step 8 — Save
-    print("\nStep 6: Saving...")
-    ml_df.to_csv(OUTPUT_ML, index=False, encoding="utf-8")
-    reference_df.to_csv(OUTPUT_REFERENCE, index=False, encoding="utf-8")
 
-    # Report
-    print("\n" + "=" * 60)
-    print("PREPROCESSING COMPLETE")
-    print("=" * 60)
+def cap_per_group(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    df = df.sample(frac=1, random_state=cfg["SEED"]).reset_index(drop=True)
+    pos = df.groupby(["label", "group_key"]).cumcount()
+    cap = np.where(df["is_ip"], cfg["MAX_PER_IP"], cfg["MAX_PER_GROUP"])
+    df = df[pos < cap]
+    # second pass: platforms whose tenants/hostnames are separate groups but which
+    # would still dominate a class (e.g. 4,000 different x.weebly.com tenants)
+    platform = (df["group_key"] != df["reg_domain"]) & (~df["is_ip"])
+    pos2 = df[platform].groupby(["label", "reg_domain"]).cumcount()
+    drop = pos2.index[pos2 >= cfg["MAX_PER_PLATFORM"]]
+    return df.drop(index=drop).reset_index(drop=True)
 
-    counts       = ml_df["label"].value_counts().sort_index()
-    benign_count = counts.get(0, 0)
-    mal_count    = counts.get(1, 0)
-    total        = len(ml_df)
 
-    print(f"\nFinal dataset  : {total:,} URLs")
-    print(f"Benign    (0)  : {benign_count:>8,}  ({100*benign_count/total:.1f}%)")
-    print(f"Malicious (1)  : {mal_count:>8,}  ({100*mal_count/total:.1f}%)")
-    print(f"Ratio          : {benign_count/max(mal_count,1):.2f}:1")
+def cap_sources(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    for name, cap in cfg["SOURCE_CAPS"].items():
+        idx = df.index[df["source"] == name]
+        if len(idx) > cap:
+            drop = np.random.RandomState(cfg["SEED"]).choice(idx, len(idx) - cap, replace=False)
+            df = df.drop(index=drop)
+    return df.reset_index(drop=True)
 
-    print(f"\nMalicious breakdown:")
-    ref_counts = reference_df["label"].value_counts()
-    for lbl in ["phishing", "malware", "malicious", "synthetic_malicious"]:
-        n = ref_counts.get(lbl, 0)
-        if n > 0:
-            print(f"  {lbl:<22}: {n:>8,}")
 
-    print(f"\nBenign breakdown:")
-    print(f"  data.csv good  : {len(data_benign):>8,}")
-    print(f"  Tranco top-1M  : {len(tranco):>8,}")
-    print(f"  Manual curated : {len(manual):>8,}")
+def cap_synthetic(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    real_mal = int(((df["label"] == 1) & (~df["is_synthetic"])).sum())
+    limit = int(cfg["SYNTHETIC_FRACTION"] * real_mal)
+    idx = df.index[df["is_synthetic"]]
+    if len(idx) > limit:
+        drop = np.random.RandomState(cfg["SEED"]).choice(idx, len(idx) - limit, replace=False)
+        df = df.drop(index=drop)
+    return df.reset_index(drop=True)
 
-    print(f"\nOutput: {OUTPUT_ML}")
-    print("Next  : python scripts/split.py")
+
+def match_classes(df: pd.DataFrame, cfg: dict) -> tuple:
+    """Make benign and malicious share the same (has_path, has_query) mix, so those
+    format features cannot separate the classes. IP-host rows are exempt (benign
+    IP URLs barely exist) and limited to IP_MAX_FRACTION of malicious."""
+    cols, seed = cfg["MATCH_COLS"], cfg["SEED"]
+    non_ip, ip = df[~df["is_ip"]], df[df["is_ip"]]
+
+    before = (non_ip.groupby(cols + ["label"]).size().unstack(fill_value=0)
+              .rename(columns={0: "benign", 1: "malicious"}))
+    kept = []
+    for _, g in non_ip.groupby(cols):
+        b, m = g[g["label"] == 0], g[g["label"] == 1]
+        n = min(len(b), len(m))
+        if n:
+            kept += [b.sample(n, random_state=seed), m.sample(n, random_state=seed)]
+    matched = pd.concat(kept) if kept else non_ip.iloc[0:0]
+    after = (matched.groupby(cols + ["label"]).size().unstack(fill_value=0)
+             .rename(columns={0: "benign", 1: "malicious"}))
+
+    scarce = before[(before.min(axis=1) == 0) & (before.max(axis=1) > 0)]
+    if len(scarce):
+        lost = int(scarce.sum().sum())
+        say(f"   [WARN] {len(scarce)} stratum(s) contain only ONE class, so {lost:,} rows "
+            "are dropped by matching:")
+        say(scarce.to_string())
+        say("   -> add data for the missing class in that stratum, or remove that column "
+            "from MATCH_COLS")
+
+    n_mal = int((matched["label"] == 1).sum())
+    ip_mal = ip[ip["label"] == 1]
+    ip_limit = int(cfg["IP_MAX_FRACTION"] / (1 - cfg["IP_MAX_FRACTION"]) * n_mal)
+    if len(ip_mal) > ip_limit:
+        ip_mal = ip_mal.sample(ip_limit, random_state=seed)
+    final = pd.concat([matched, ip_mal, ip[ip["label"] == 0]])
+    final = final.sample(frac=1, random_state=seed).reset_index(drop=True)
+    return final, before, after
+
+
+# ═════════════════════════ main ═════════════════════════
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--raw-dir", default=os.path.join(BASE_DIR, "data", "raw"))
+    ap.add_argument("--out-dir", default=os.path.join(BASE_DIR, "data", "processed"))
+    ap.add_argument("--report-dir", default=os.path.join(BASE_DIR, "reports"))
+    ap.add_argument("--ref-dir", default=os.path.join(BASE_DIR, "data", "reference"))
+    ap.add_argument("--max-per-group", type=int)
+    ap.add_argument("--seed", type=int)
+    args = ap.parse_args()
+
+    cfg = dict(CONFIG)
+    if args.max_per_group:
+        cfg["MAX_PER_GROUP"] = args.max_per_group
+    if args.seed:
+        cfg["SEED"] = args.seed
+    for d in (args.out_dir, args.report_dir, args.ref_dir):
+        os.makedirs(d, exist_ok=True)
+
+    say("=" * 70)
+    say("PREPROCESSING v2")
+    say("=" * 70)
+    say("\n1. Loading raw sources")
+    sources, tranco = load_sources(args.raw_dir, cfg)
+    if not sources:
+        sys.exit(f"No raw files found in {args.raw_dir}")
+
+    funnel = Funnel()
+    funnel.snap_raw("raw", {s["name"]: len(s["urls"]) for s in sources})
+
+    say("\n2. Canonicalizing (scheme removed, www removed, &amp; decoded, validated)")
+    df = canonicalize_all(sources, funnel)
+    funnel.snap("canonicalized", df)
+
+    if cfg["DROP_TRANCO_SHARED_ROOTS"]:
+        is_tranco = df["source"].str.startswith("Tranco")
+        shared_root = is_tranco & df["shared_platform"]      # github.io, web.app ...
+        say(f"   dropping {int(shared_root.sum())} Tranco rows that are shared-platform roots")
+        df = df[~shared_root].reset_index(drop=True)
+        funnel.snap("no_shared_roots", df)
+
+    say("\n3. Removing duplicates and URLs labelled both ways")
+    df, n_conflict, n_dup = dedupe_and_conflicts(df, funnel, cfg["SEED"])
+    say(f"   URL-level label conflicts removed: {n_conflict:,} | duplicates: {n_dup:,}")
+
+    conf = group_conflicts(df)
+    conf.to_csv(os.path.join(args.report_dir, "preprocessing_conflicts.csv"))
+    say(f"   groups carrying both labels (kept, reported): {len(conf):,}")
+
+    say(f"\n4. Capping rows: per group <= {cfg['MAX_PER_GROUP']}, per IP <= {cfg['MAX_PER_IP']}, "
+        f"per platform <= {cfg['MAX_PER_PLATFORM']}")
+    df = cap_per_group(df, cfg)
+    funnel.snap("group_capped", df)
+
+    if cfg["SOURCE_CAPS"]:
+        df = cap_sources(df, cfg)
+        funnel.snap("source_capped", df)
+
+    say(f"\n5. Limiting synthetic rows to {cfg['SYNTHETIC_FRACTION']:.0%} of real malicious")
+    df = cap_synthetic(df, cfg)
+    funnel.snap("synthetic_capped", df)
+
+    say(f"\n6. Matching classes on {cfg['MATCH_COLS']} (IP hosts exempt)")
+    pool_stats = {c: df.groupby("label")[c].mean().round(3).to_dict()
+                  for c in ("has_path", "has_query", "is_ip")}
+    df, before, after = match_classes(df, cfg)
+    funnel.snap("class_matched", df)
+    say("   strata before matching:\n" + before.to_string())
+    say("   strata after matching:\n" + after.to_string())
+
+    # ───────── final checks (fail loudly) ─────────
+    say("\n7. Final checks")
+    assert df["url"].notna().all() and df["label"].isin([0, 1]).all(), "null url or bad label"
+    assert not df["url"].str.lower().duplicated().any(), "duplicate URLs survived"
+    assert df["group_key"].notna().all(), "missing group_key"
+    n_b, n_m = int((df.label == 0).sum()), int((df.label == 1).sum())
+    ratio = n_m / max(n_b, 1)
+    say(f"   benign {n_b:,} | malicious {n_m:,} | ratio {ratio:.3f}")
+    if not 0.85 <= ratio <= 1.15:
+        say("   [WARN] classes differ by more than 15%: check the strata tables above")
+
+    cols = ["url", "label", "source", "label_type", "scheme", "host", "reg_domain",
+            "suffix", "group_key", "has_path", "has_query", "is_ip", "is_synthetic",
+            "url_raw"]
+    out_path = os.path.join(args.out_dir, "cleaned_urls_v2.csv")
+    df[cols].to_csv(out_path, index=False, encoding="utf-8")
+
+    if tranco is not None:
+        ref = tranco[tranco["rank"] <= cfg["POPULAR_REF_N"]].sort_values("rank")
+        ref.assign(rank=ref["rank"].astype(int)).to_csv(
+            os.path.join(args.ref_dir, "popular_domains.csv"), index=False, header=False)
+
+    # ───────── report ─────────
+    tbl = funnel.table()
+    say("\n" + "=" * 70)
+    say("FUNNEL: rows per source after each step")
+    say("=" * 70)
+    say(tbl.to_string())
+    if funnel.reasons:
+        say("\nDrop reasons during canonicalization (source, reason): count")
+        for (s, r), n in sorted(funnel.reasons.items(), key=lambda x: -x[1])[:15]:
+            say(f"   {s:<34} {r:<18} {n:>8,}")
+
+    comp = pd.crosstab(df["source"], df["label"].map({0: "benign", 1: "malicious"}))
+    say("\nFinal composition by source:")
+    say(comp.to_string())
+    final_stats = {c: df.groupby("label")[c].mean().round(3).to_dict()
+                   for c in ("has_path", "has_query", "is_ip")}
+    say(f"\nhas_path / has_query / is_ip per class (label 0, 1):\n   {final_stats}")
+    say(f"\nWrote {out_path}")
+
+    report = dict(config={k: (v if not isinstance(v, dict) else v) for k, v in cfg.items()},
+                  funnel=tbl.reset_index().to_dict(orient="records"),
+                  drop_reasons={f"{s}|{r}": n for (s, r), n in funnel.reasons.items()},
+                  url_label_conflicts=n_conflict, duplicates=n_dup,
+                  groups_with_both_labels=int(len(conf)),
+                  pool_stats_before_matching=pool_stats,
+                  final_stats=final_stats,
+                  final_counts=dict(benign=n_b, malicious=n_m),
+                  composition=comp.to_dict())
+    with open(os.path.join(args.report_dir, "preprocessing_report.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, default=str)
+    say(f"Wrote {os.path.join(args.report_dir, 'preprocessing_report.json')}")
+    say("\nNext: python scripts/split.py")
 
 
 if __name__ == "__main__":
