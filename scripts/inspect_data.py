@@ -8,7 +8,9 @@ Run from the project root (venv active):
     python scripts/inspect_raw.py --n 20
 
 Reads  data/raw/: Phish.csv, urlhaus.txt, openphish.txt, data.csv,
-                  top-1m.csv, synthetic_malicious.csv   (missing ones are skipped)
+                  top-1m.csv, synthetic_malicious.csv,
+                  PhiUSIIL_Phishing_URL_Dataset.csv,
+                  phishing-links-ACTIVE.txt           (missing ones are skipped)
 Writes reports/raw_inspection.txt  (same text as the console; paste it to me)
 
 Sections
@@ -102,6 +104,30 @@ def load_sources(raw_dir: str, tranco_n: int) -> tuple:
     if os.path.exists(p("synthetic_malicious.csv")):
         df = pd.read_csv(p("synthetic_malicious.csv"), dtype=str)
         src["Synthetic typosquats"] = (df["url"].dropna(), "malicious")
+
+
+    # PhiUSIIL (UCI id 967): label 1 = legitimate, 0 = phishing (REVERSED vs this project)
+    phi = p("PhiUSIIL_Phishing_URL_Dataset.csv")
+    if os.path.exists(phi):
+        df = pd.read_csv(phi, dtype=str, low_memory=False,
+                         usecols=lambda c: c.strip().lower() in ("url", "label"))
+        cols = {c.strip().lower(): c for c in df.columns}
+        if "url" in cols and "label" in cols:
+            lab  = pd.to_numeric(df[cols["label"]], errors="coerce")
+            urls = df[cols["url"]]
+            src["PhiUSIIL (legitimate)"] = (urls[lab == 1].dropna().astype(str), "benign")
+            src["PhiUSIIL (phishing)"]   = (urls[lab == 0].dropna().astype(str), "malicious")
+            notes.append("PhiUSIIL: label 1 = legitimate, 0 = phishing "
+                         f"(counts: {lab.value_counts().to_dict()})")
+        else:
+            notes.append(f"PhiUSIIL file found but no URL/label columns: {list(df.columns)}")
+
+    # Phishing.Database active links: plain text, one URL per line
+    pdb = p("phishing-links-ACTIVE.txt")
+    if os.path.exists(pdb):
+        with open(pdb, encoding="utf-8", errors="ignore") as fh:
+            s = pd.Series([l.strip() for l in fh if l.strip() and not l.startswith("#")])
+        src["Phishing.Database (active links)"] = (s, "malicious")
 
     tranco = None
     if os.path.exists(p("top-1m.csv")):
