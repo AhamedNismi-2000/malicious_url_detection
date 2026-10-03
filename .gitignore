@@ -13,7 +13,6 @@ venv/
 .vscode/
 
 # Data directories
-
 processed/
 splits/
 tranco_top1000.txt
