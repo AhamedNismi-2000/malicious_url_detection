@@ -239,9 +239,11 @@ def section_tld(df: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) -> No
 def section_domains(df: pd.DataFrame, train: pd.DataFrame, val: pd.DataFrame,
                     test: pd.DataFrame) -> None:
     header("4. DOMAIN OVERLAP BETWEEN SPLITS (leakage)")
-    train_dom = set(train["registered_domain"])
+    key = "group_key" if "group_key" in train.columns else "registered_domain"
+    print(f"(overlap is judged on '{key}')")
+    train_dom = set(train[key])
     for name, part in (("val", val), ("test", test)):
-        seen = part["registered_domain"].isin(train_dom)
+        seen = part[key].isin(train_dom)
         share = float(seen.mean())
         print(f"{name}: {pct(share)} of rows share a registered domain with train "
               f"({int(seen.sum()):,} rows)")
@@ -250,9 +252,19 @@ def section_domains(df: pd.DataFrame, train: pd.DataFrame, val: pd.DataFrame,
             flag("WARN", f"{pct(share)} of test rows come from domains seen in "
                          "training: metrics are inflated. Split by registered_domain")
 
+    if "group_key" in train.columns:
+        ro = float(test["registered_domain"].isin(set(train["registered_domain"])).mean())
+        print(f"(informational) test rows sharing a registered domain with train: {pct(ro)}"
+              " - tenants of one platform are separate groups by design")
+        gk = set(train["group_key"])
+        for name, part in (("val", val), ("test", test)):
+            print(f"{name}: {pct(float(part['group_key'].isin(gk).mean()))} of rows share a "
+                  "group_key with train (must be 0.0% for a clean split)")
+            REPORT[f"{name}_group_key_overlap"] = round(float(part["group_key"].isin(gk).mean()), 4)
+
     # domain-memorisation baseline
-    maj  = train.groupby("registered_domain")["label"].mean().ge(0.5).astype(int)
-    pred = test["registered_domain"].map(maj)
+    maj  = train.groupby(key)["label"].mean().ge(0.5).astype(int)
+    pred = test[key].map(maj)
     cov  = pred.notna()
     if cov.any():
         acc = float((pred[cov] == test.loc[cov, "label"]).mean())
@@ -324,11 +336,24 @@ def section_baselines(train: pd.DataFrame, test: pd.DataFrame) -> None:
 
 # ───────────────────────── main ─────────────────────────
 def main() -> None:
+    global CLEANED, REFERENCE, SPLIT_PATHS
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cleaned", help="cleaned CSV (default: data/processed/cleaned_urls.csv)")
+    ap.add_argument("--splits-dir", help="folder with train/val/test_urls.csv")
+    ap.add_argument("--reference", help="reference CSV with label types (optional)")
+    a = ap.parse_args()
+    if a.cleaned:
+        CLEANED = a.cleaned
+    if a.reference:
+        REFERENCE = a.reference
+    if a.splits_dir:
+        SPLIT_PATHS = {k: os.path.join(a.splits_dir, f"{k}_urls.csv") for k in SPLIT_PATHS}
     print("DATA AUDIT (read-only)")
     full, df = load()
 
     ref = None
-    if os.path.exists(REFERENCE):
+    if "label_type" not in df.columns and os.path.exists(REFERENCE):
         ref = pd.read_csv(REFERENCE, dtype=str).rename(columns={"label": "label_type"})
         ref = ref.drop_duplicates(subset=["url"])
         df = df.merge(ref[["url", "label_type"]], on="url", how="left")
@@ -344,6 +369,10 @@ def main() -> None:
             "has_query", "has_upper", "is_ip", "url_len"]
     parsed = pd.DataFrame([parse_one(u) for u in tqdm(df["url"], desc="parse")],
                           columns=cols, index=df.index)
+    keep_scheme = "scheme" in df.columns          # v2 data stores the OBSERVED scheme
+    df = df.drop(columns=[c for c in cols if c in df.columns and not (c == "scheme" and keep_scheme)])
+    if keep_scheme:
+        parsed = parsed.drop(columns=["scheme"])
     df = pd.concat([df, parsed], axis=1)
     df["is_https"] = (df["scheme"] == "https").astype(int)   # before slicing
 
