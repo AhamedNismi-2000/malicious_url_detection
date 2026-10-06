@@ -17,6 +17,7 @@ processed/
 splits/
 tranco_top1000.txt
 reports/
+data/
 
 features/
 # Logs
