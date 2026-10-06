@@ -16,6 +16,7 @@ venv/
 processed/
 splits/
 tranco_top1000.txt
+reports/
 
 features/
 # Logs
