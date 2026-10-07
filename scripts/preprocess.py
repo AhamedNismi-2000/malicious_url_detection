@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-preprocessing.py  (v2)  -  build ONE clean, documented dataset from all raw sources
+preprocess.py  (v2)  -  build ONE clean, documented dataset from all raw sources
 ------------------------------------------------------------------------------------
-Run from the project root (venv active):
+Run from the project root (venv active). No flags needed, all options are in CONFIG:
 
-    python scripts/preprocessing.py                  # strict: stops on any failed gate
-    python scripts/preprocessing.py --no-strict      # diagnose: still writes the data
-    python scripts/preprocessing.py --selftest       # run on tiny mock data
-    python scripts/preprocessing.py --max-per-group 15 --out-dir data/processed
+    python scripts/preprocess.py
+
+Optional (rarely needed):
+    python scripts/preprocess.py --no-strict      # diagnose: still writes the data
+    python scripts/preprocess.py --selftest       # run on tiny mock data
 
 Needs scripts/url_utils.py next to this file.
 
@@ -41,12 +42,12 @@ Schema of cleaned_urls_v2.csv
     scheme      scheme observed in the source ("" = unknown; never invented)
     host, reg_domain, suffix, group_key
     has_path, has_query, is_ip, is_synthetic
-    technique   typosquat technique for synthetic rows ("" otherwise)      # v2:
+    technique   typosquat technique for synthetic rows ("" otherwise)
     url_raw     exactly as collected (debugging only)
 
 Pipeline (each step is counted per source in the report)
     preflight -> load -> canonicalize -> dedupe -> label conflicts -> per-group cap ->
-    source caps -> synthetic cap -> class matching -> GATES -> atomic write
+    source caps -> synthetic cap -> class matching -> TLD balance -> GATES -> atomic write
 
 Every change compared with the previous v2 file is marked  "# v2:".
 """
@@ -81,18 +82,28 @@ CONFIG = dict(
     SYNTHETIC_FRACTION=0.02, # synthetic rows <= this share of the REAL malicious rows
     IP_MAX_FRACTION=0.05,    # IP-host rows <= this share of final malicious rows
     MATCH_COLS=["has_path", "has_query"],   # classes are matched on these
-    SOURCE_CAPS={},          # e.g. {"PhiUSIIL (legitimate)": 60000}
+
+    # v2: PhiUSIIL phishing was 69% of all malicious rows in the first real run.
+    # The cap is applied BEFORE class matching, so the benign side is trimmed to follow.
+    SOURCE_CAPS={"PhiUSIIL (phishing)": 35_000},
+
     # Tranco sampling: (rank_from, rank_to, rows_to_sample). Long tail on purpose.
     TRANCO_BUCKETS=[(1, 1_000, 1_000), (1_001, 10_000, 6_000),
                     (10_001, 100_000, 25_000), (100_001, 1_000_000, 60_000)],
     DROP_TRANCO_SHARED_ROOTS=True,   # drop roots like web.app / github.io from benign
     POPULAR_REF_N=10_000,
 
-    # v2: raw files that are never loaded (they stay on disk). data.csv has no scheme:
+    # raw files that are never loaded (they stay on disk). data.csv has no scheme:
     # the old pipeline invented "http://" for it, which created a scheme shortcut.
     DISABLED_SOURCES=["data.csv"],
 
-    # v2: GATES. HARD gates stop the run (no dataset written), SOFT gates only warn.
+    # v2: TLD balance check (a suffix that mostly belongs to one class is a shortcut)
+    TLD_TOP_N=15,            # suffixes shown in the table
+    TLD_GAP_WARN_PP=10.0,    # soft: |malicious% - benign%| of one suffix above this
+    TLD_MIN_ROWS=50,         # suffixes with fewer rows count as coin flips in the shortcut score
+    TLD_SHORTCUT_MAX=0.65,   # soft: accuracy of "guess by suffix alone" must stay below this
+
+    # GATES. HARD gates stop the run (no dataset written), SOFT gates only warn.
     # Tune the numbers to your data, but do not remove a gate to "make it pass".
     MIN_SOURCE_ROWS=100,          # soft: a loaded source smaller than this is suspicious
     MIN_CANON_KEEP=0.50,          # soft: share of a source surviving canonicalization
@@ -137,7 +148,7 @@ def say(msg: str = "") -> None:
     print(msg, flush=True)
 
 
-# v2: ───────────────────────── gates ─────────────────────────
+# ───────────────────────── gates ─────────────────────────
 class Gates:
     """Collects PASS / FAIL / WARN results. hard=True gates stop the run."""
 
@@ -179,11 +190,11 @@ def _col(t: pd.DataFrame, name: str) -> int:
 # ═════════════════════════ loaders ═════════════════════════
 def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tuple:
     """Return (list of source dicts, tranco_frame_or_None, problems, disabled_files).
-    problems = errors that must stop the run (a file exists but could not be used)."""   # v2:
+    problems = errors that must stop the run (a file exists but could not be used)."""
     out: list = []
-    problems: list = []                                                                  # v2:
-    disabled_seen: list = []                                                             # v2:
-    disabled = set() if include_disabled else set(cfg.get("DISABLED_SOURCES", []))      # v2:
+    problems: list = []
+    disabled_seen: list = []
+    disabled = set() if include_disabled else set(cfg.get("DISABLED_SOURCES", []))
     rng_seed = cfg["SEED"]
 
     def p(name):
@@ -194,17 +205,17 @@ def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tup
         keep = s.notna()
         s = s[keep].astype(str).reset_index(drop=True)
         t = None
-        if technique is not None:                                                         # v2:
+        if technique is not None:
             t = pd.Series(technique).reset_index(drop=True)[keep]
             t = t.fillna("").astype(str).reset_index(drop=True)
         out.append(dict(name=name, label=label, label_type=ltype,
                         synthetic=synthetic, urls=s, technique=t))
         say(f"  loaded {name:<38} {len(s):>9,} rows")
-        if len(s) == 0:                                                                   # v2:
+        if len(s) == 0:
             problems.append(f"{name}: file was read but contains 0 usable URLs")
 
     def attempt(fname, fn):
-        if fname in disabled:                                                             # v2:
+        if fname in disabled:
             if os.path.exists(p(fname)):
                 say(f"  (DISABLED on purpose) {fname}: not loaded, file left untouched")
             disabled_seen.append(fname)
@@ -214,7 +225,7 @@ def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tup
             return
         try:
             fn()
-        except Exception as exc:                          # v2: record instead of hiding
+        except Exception as exc:                          # record instead of hiding
             say(f"  [ERROR] {fname}: {exc}")
             problems.append(f"{fname}: could not be read ({exc})")
 
@@ -259,12 +270,12 @@ def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tup
 
     def synthetic():
         df = pd.read_csv(p("synthetic_malicious.csv"), dtype=str)
-        tech = df["technique"] if "technique" in df.columns else None                    # v2:
+        tech = df["technique"] if "technique" in df.columns else None
         add("Synthetic typosquats", 1, "synthetic_typosquat", df["url"],
             synthetic=True, technique=tech)
 
     def crawled():
-        # v2: real scheme, path and query are kept by canonicalize() (stored in "scheme")
+        # real scheme, path and query are kept by canonicalize() (stored in "scheme")
         df = pd.read_csv(p("benign_crawled.csv"), dtype=str)
         add("Crawled benign", 0, "benign", df["url"])
 
@@ -293,7 +304,7 @@ def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tup
             add("Tranco (rank-bucket sample)", 0, "benign", sample["domain"])
         except Exception as exc:
             say(f"  [ERROR] top-1m.csv: {exc}")
-            problems.append(f"top-1m.csv: could not be read ({exc})")                    # v2:
+            problems.append(f"top-1m.csv: could not be read ({exc})")
     else:
         say("  (skip) top-1m.csv not found")
     return out, tranco, problems, disabled_seen
@@ -303,7 +314,7 @@ def load_sources(raw_dir: str, cfg: dict, include_disabled: bool = False) -> tup
 def canonicalize_all(sources: list, funnel: Funnel) -> pd.DataFrame:
     rows: list = []
     for src in sources:
-        techs = src["technique"].tolist() if src.get("technique") is not None else None  # v2:
+        techs = src["technique"].tolist() if src.get("technique") is not None else None
         for i, raw in enumerate(tqdm(src["urls"], desc=f"canon {src['name'][:22]}",
                                      leave=False)):
             c, reason = canonicalize(raw)
@@ -312,11 +323,11 @@ def canonicalize_all(sources: list, funnel: Funnel) -> pd.DataFrame:
                 continue
             c.update(source=src["name"], label=src["label"],
                      label_type=src["label_type"], is_synthetic=src["synthetic"],
-                     technique=(techs[i] if techs is not None else ""),                 # v2:
+                     technique=(techs[i] if techs is not None else ""),
                      url_raw=str(raw).replace("\n", " ").replace("\r", " "))
             rows.append(c)
     df = pd.DataFrame(rows)
-    if len(df):                                                                          # v2:
+    if len(df):
         df["label"] = df["label"].astype(int)
     return df
 
@@ -364,6 +375,7 @@ def cap_sources(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         if len(idx) > cap:
             drop = np.random.RandomState(cfg["SEED"]).choice(idx, len(idx) - cap, replace=False)
             df = df.drop(index=drop)
+            say(f"   capped '{name}': {len(idx):,} -> {cap:,} rows")             # v2:
     return df.reset_index(drop=True)
 
 
@@ -383,13 +395,13 @@ def match_classes(df: pd.DataFrame, cfg: dict) -> tuple:
     IP URLs barely exist) and limited to IP_MAX_FRACTION of malicious."""
     cols, seed = cfg["MATCH_COLS"], cfg["SEED"]
     non_ip, ip = df[~df["is_ip"]], df[df["is_ip"]]
-    if len(non_ip) == 0:                                                                  # v2:
+    if len(non_ip) == 0:
         empty = pd.DataFrame(columns=["benign", "malicious"])
         return df.iloc[0:0], empty, empty
 
     before = (non_ip.groupby(cols + ["label"]).size().unstack(fill_value=0)
               .rename(columns={0: "benign", 1: "malicious"}))
-    for c in ("benign", "malicious"):                                                     # v2:
+    for c in ("benign", "malicious"):
         if c not in before.columns:
             before[c] = 0
     kept = []
@@ -422,7 +434,30 @@ def match_classes(df: pd.DataFrame, cfg: dict) -> tuple:
     return final, before, after
 
 
-# v2: ───────────────────────── preflight + gate evaluation ─────────────────────────
+# v2: ───────────────────────── TLD class balance ─────────────────────────
+def tld_balance(df: pd.DataFrame, cfg: dict) -> tuple:
+    """Per-suffix share of each class (IP hosts excluded: they have no TLD), plus the
+    accuracy of guessing the class from the suffix alone (0.5 = no shortcut)."""
+    d = df[~df["is_ip"]]
+    suf = d["suffix"].fillna("").replace("", "(none)")
+    ct = pd.crosstab(suf, d["label"].map({0: "benign", 1: "malicious"}))
+    for c in ("benign", "malicious"):
+        if c not in ct.columns:
+            ct[c] = 0
+    ct["total"] = ct["benign"] + ct["malicious"]
+    n_b, n_m = max(int(ct["benign"].sum()), 1), max(int(ct["malicious"].sum()), 1)
+    ct["benign_%"] = (100 * ct["benign"] / n_b).round(1)
+    ct["malicious_%"] = (100 * ct["malicious"] / n_m).round(1)
+    ct["gap_pp"] = (ct["malicious_%"] - ct["benign_%"]).round(1)
+    # rare suffixes would look perfectly predictive by chance: count them as coin flips
+    best = np.where(ct["total"] >= cfg["TLD_MIN_ROWS"],
+                    np.maximum(ct["benign"], ct["malicious"]), ct["total"] / 2)
+    acc = float(best.sum() / max(ct["total"].sum(), 1))
+    top = ct.sort_values("total", ascending=False).head(cfg["TLD_TOP_N"])
+    return top[["benign", "malicious", "benign_%", "malicious_%", "gap_pp"]], acc
+
+
+# ───────────────────────── preflight + gate evaluation ─────────────────────────
 def preflight(raw_dir: str, sources: list, problems: list) -> list:
     """Return a list of fatal messages. Empty list = OK to continue."""
     fatal = list(problems)
@@ -523,7 +558,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
     say("\n1. Loading raw sources")
     sources, tranco, problems, disabled_seen = load_sources(raw_dir, cfg, include_disabled)
 
-    # v2: preflight. A source that exists but cannot be read must never be skipped silently.
+    # preflight. A source that exists but cannot be read must never be skipped silently.
     fatal = preflight(raw_dir, sources, problems)
     if fatal:
         say("\n" + "!" * 70)
@@ -569,6 +604,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
     funnel.snap("group_capped", df)
 
     if cfg["SOURCE_CAPS"]:
+        say(f"   source caps: {cfg['SOURCE_CAPS']}")                               # v2:
         df = cap_sources(df, cfg)
         funnel.snap("source_capped", df)
 
@@ -580,7 +616,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
     pool_stats = {c: df.groupby("label")[c].mean().round(3).to_dict()
                   for c in ("has_path", "has_query", "is_ip")}
     pool_benign_path = int(((df["label"] == 0) & (~df["is_ip"])
-                            & (df["has_path"] | df["has_query"])).sum())            # v2:
+                            & (df["has_path"] | df["has_query"])).sum())
     df, before, after = match_classes(df, cfg)
     funnel.snap("class_matched", df)
     say("   strata before matching:\n" + before.to_string())
@@ -603,7 +639,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
     say(comp.to_string())
 
     scheme_tbl = pd.DataFrame()
-    if len(df):                                                                       # v2:
+    if len(df):
         scheme_tbl = df.groupby("source").agg(
             rows=("url", "size"),
             scheme_known_pct=("scheme", lambda s: round(100 * (s != "").mean(), 1)),
@@ -617,9 +653,31 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
                    for c in ("has_path", "has_query", "is_ip")} if len(df) else {}
     say(f"\nhas_path / has_query / is_ip per class (label 0, 1):\n   {final_stats}")
 
-    # ───────── v2: gates (fail loudly) ─────────
+    # ───────── gates (fail loudly) ─────────
     say("\n7. Gates")
     gates = evaluate_gates(cfg, funnel, sources, df, pool_benign_path, before, after, True)
+
+    # v2: TLD balance table + soft gates
+    tld_top, tld_acc = pd.DataFrame(), float("nan")
+    if len(df):
+        tld_top, tld_acc = tld_balance(df, cfg)
+        say("\nTLD balance (non-IP rows; share of each class per suffix):")
+        say(tld_top.to_string())
+        say(f"   accuracy of guessing by suffix alone: {tld_acc:.1%} (50% = no shortcut)\n")
+        lop = tld_top[tld_top["gap_pp"].abs() >= cfg["TLD_GAP_WARN_PP"]]
+        gates.check("tld_balance", len(lop) == 0,
+                    ("no top suffix differs by >= %.0f points between classes"
+                     % cfg["TLD_GAP_WARN_PP"]) if len(lop) == 0 else
+                    "lopsided suffixes: " + ", ".join(
+                        f"{i} ({r.gap_pp:+.1f} pp)" for i, r in lop.iterrows()),
+                    hard=False,
+                    fix="add data for the under-represented class on those suffixes "
+                        "(e.g. crawl more benign sites there) or state it as a limitation")
+        gates.check("tld_shortcut", tld_acc <= cfg["TLD_SHORTCUT_MAX"],
+                    f"suffix alone predicts the class with {tld_acc:.1%} accuracy "
+                    f"(limit {cfg['TLD_SHORTCUT_MAX']:.0%})", hard=False,
+                    fix="the model could learn the TLD instead of the URL structure")
+
     gates.print()
     hard = gates.failed_hard()
     status = "passed" if not hard else ("forced" if not strict else "failed")
@@ -639,7 +697,10 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
                   benign_with_path_before_matching=pool_benign_path,
                   scheme_profile=scheme_tbl.reset_index().to_dict(orient="records"),
                   final_stats=final_stats, final_counts=dict(benign=n_b, malicious=n_m),
-                  composition=comp.to_dict())
+                  composition=comp.to_dict(),
+                  tld_balance=tld_top.reset_index().to_dict(orient="records"),     # v2:
+                  tld_only_accuracy=(None if np.isnan(tld_acc)
+                                     else round(float(tld_acc), 4)))               # v2:
     _write_report(report_path, report)
 
     if tranco is not None:
@@ -650,7 +711,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
 
     cols = ["url", "label", "source", "label_type", "scheme", "host", "reg_domain",
             "suffix", "group_key", "has_path", "has_query", "is_ip", "is_synthetic",
-            "technique", "url_raw"]                                                    # v2:
+            "technique", "url_raw"]
 
     say("\n" + "=" * 70)
     if status == "failed":
@@ -660,7 +721,7 @@ def run(cfg: dict, raw_dir: str, out_dir: str, report_dir: str, ref_dir: str,
         if os.path.exists(out_path):
             say(f"   WARNING: {out_path} is an OLD file from an earlier run. Do not use it.")
         say(f"   Details: {report_path}")
-        say("   To look at the data anyway:  python scripts/preprocessing.py --no-strict")
+        say("   To look at the data anyway:  python scripts/preprocess.py --no-strict")
         say("=" * 70)
         return 1
 
@@ -686,7 +747,7 @@ def _write_report(path: str, report: dict) -> None:
                                            indent=2, default=str))
 
 
-# v2: ───────────────────────── self-test on tiny mock data ─────────────────────────
+# ───────────────────────── self-test on tiny mock data ─────────────────────────
 def _selftest() -> int:
     import contextlib
     import io
@@ -767,7 +828,8 @@ def _selftest() -> int:
         return out, text
 
     out, text = scenario("A_good_data", 0, True,
-                         want_in_text=("DISABLED on purpose", "PREPROCESSING PASSED"))
+                         want_in_text=("DISABLED on purpose", "PREPROCESSING PASSED",
+                                       "TLD balance"))                             # v2:
     if os.path.exists(out):
         d = pd.read_csv(out, keep_default_na=False)
         checks = {
@@ -787,6 +849,14 @@ def _selftest() -> int:
     scenario("C_corrupt_source", 2, False, want_in_text=("PREFLIGHT FAILED",), corrupt=True)
     scenario("D_forced", 0, True, want_in_text=("FORCED",), crawled=False, strict=False)
 
+    # v2: unit test of the TLD table on a deliberately lopsided frame
+    lop = pd.DataFrame({"suffix": ["com"] * 100 + ["xyz"] * 100,
+                        "label": [0] * 100 + [1] * 100, "is_ip": [False] * 200})
+    top, acc = tld_balance(lop, CONFIG)
+    ok = acc > 0.95 and abs(float(top.loc["xyz", "gap_pp"])) >= CONFIG["TLD_GAP_WARN_PP"]
+    results.append(ok)
+    say(f"[{'PASS' if ok else 'FAIL'}] tld_balance flags a lopsided suffix (acc={acc:.2f})")
+
     shutil.rmtree(tmp, ignore_errors=True)
     n_ok = sum(results)
     say(f"\nself-test: {n_ok}/{len(results)} passed")
@@ -802,11 +872,11 @@ def main() -> None:
     ap.add_argument("--ref-dir", default=os.path.join(BASE_DIR, "data", "reference"))
     ap.add_argument("--max-per-group", type=int)
     ap.add_argument("--seed", type=int)
-    ap.add_argument("--no-strict", action="store_true",       # v2:
+    ap.add_argument("--no-strict", action="store_true",
                     help="write the dataset even if hard gates fail (diagnosis only)")
-    ap.add_argument("--include-disabled", action="store_true",  # v2:
+    ap.add_argument("--include-disabled", action="store_true",
                     help="also load DISABLED_SOURCES (e.g. data.csv)")
-    ap.add_argument("--selftest", action="store_true")          # v2:
+    ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
     if args.selftest:
