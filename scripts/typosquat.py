@@ -546,6 +546,7 @@ FEATURE_NAMES = ["ts_lookalike_score", "ts_edit_distance", "ts_combosquat",
 
 def feature_vector(url: str) -> list:
     """5 numeric features for the model. Same function in training and serving."""
+    get_index()          # a missing popular_domains.csv must fail loudly, never become zeros
     try:
         m = analyze(url)["matches"]
     except Exception:
