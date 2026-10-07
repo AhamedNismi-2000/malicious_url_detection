@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-audit_data.py  -  read-only data audit for the malicious-URL project
---------------------------------------------------------------------
-Run from the project root (venv active):
+audit_data.py  (v2)  -  read-only data audit for the malicious-URL project
+--------------------------------------------------------------------------
+Run from the project root (venv active). No flags needed, edit SETTINGS below:
 
     python scripts/audit_data.py
 
 Reads (never modifies):
-    data/processed/cleaned_urls.csv
-    data/splits/train_urls.csv, val_urls.csv, test_urls.csv
-    data/processed/cleaned_urls_reference.csv   (optional, gives label types)
+    data/processed/cleaned_urls_v2.csv
+    data/splits_v2/train_urls.csv, val_urls.csv, test_urls.csv
 
 Writes:
     reports/data_audit.json
@@ -23,6 +22,8 @@ What it measures (each maps to a known risk):
     5. Domain-level label conflicts        -> label noise (shared hosting)
     6. Near-duplicate URLs across splits   -> leakage
     7. Trivial-feature baselines           -> how much a model can "cheat"
+
+Every change compared with the previous file is marked  "# v2:".
 """
 
 import json
@@ -42,15 +43,16 @@ except ImportError:                      # tqdm is optional
     def tqdm(x, **_):
         return x
 
-# ───────────────────────── paths ─────────────────────────
+# ═════════════════════════ SETTINGS (edit here) ═════════════════════════
 BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLEANED    = os.path.join(BASE_DIR, "data", "processed", "cleaned_urls.csv")
-REFERENCE  = os.path.join(BASE_DIR, "data", "processed", "cleaned_urls_reference.csv")
-SPLIT_PATHS = {
-    "train": os.path.join(BASE_DIR, "data", "splits", "train_urls.csv"),
-    "val"  : os.path.join(BASE_DIR, "data", "splits", "val_urls.csv"),
-    "test" : os.path.join(BASE_DIR, "data", "splits", "test_urls.csv"),
+CLEANED    = os.path.join(BASE_DIR, "data", "processed", "cleaned_urls_v2.csv")
+SPLITS_DIR = os.path.join(BASE_DIR, "data", "splits_v2")                      # v2: fixed path
+SPLIT_PATHS = {                                                               # v2:
+    "train": os.path.join(SPLITS_DIR, "train_urls.csv"),
+    "val"  : os.path.join(SPLITS_DIR, "val_urls.csv"),
+    "test" : os.path.join(SPLITS_DIR, "test_urls.csv"),
 }
+HOLDOUT_FILE = os.path.join(SPLITS_DIR, "test_holdout_source.csv")            # v2: optional
 REPORT_DIR = os.path.join(BASE_DIR, "reports")
 os.makedirs(REPORT_DIR, exist_ok=True)
 
@@ -95,13 +97,14 @@ def load() -> tuple:
     needed  = [CLEANED] + list(SPLIT_PATHS.values())
     missing = [p for p in needed if not os.path.exists(p)]
     if missing:
-        sys.exit("Missing files (run preprocessing.py and split.py first):\n  "
+        sys.exit("Missing files (run preprocess.py and split.py first):\n  "
                  + "\n  ".join(missing))
 
-    full = pd.read_csv(CLEANED, dtype={"url": str})
+    # v2: keep_default_na=False so a domain such as "na" or "null" is never turned into NaN
+    full = pd.read_csv(CLEANED, dtype={"url": str}, keep_default_na=False)
     parts = []
     for name, path in SPLIT_PATHS.items():
-        d = pd.read_csv(path, dtype={"url": str})
+        d = pd.read_csv(path, dtype={"url": str}, keep_default_na=False)
         d["split"] = name
         parts.append(d)
     return full, pd.concat(parts, ignore_index=True)
@@ -149,14 +152,25 @@ def section_schema(full: pd.DataFrame, df: pd.DataFrame) -> None:
     bad_labels = set(df["label"].dropna().unique()) - {0, 1}
     nulls      = int(df["url"].isna().sum() + df["label"].isna().sum())
     dup_in     = int(df.duplicated(subset=["url"]).sum())
-    print(f"rows in cleaned_urls.csv : {len(full):,}")
+    print(f"rows in cleaned file     : {len(full):,}")
     print(f"rows across splits       : {len(df):,}")
     print(f"null url/label values    : {nulls}")
     print(f"duplicate URLs (all)     : {dup_in:,}")
 
-    if len(full) != len(df):
-        flag("WARN", f"cleaned_urls.csv has {len(full):,} rows but splits have "
-                     f"{len(df):,}: splits are stale or incomplete")
+    # v2: the split legitimately drops synthetic rows whose group landed in val/test
+    # (and near-duplicates, and held-out sources), so a small difference is expected.
+    n_syn = 0
+    if "is_synthetic" in full.columns:
+        n_syn = int(full["is_synthetic"].astype(str).str.lower().isin(["true", "1"]).sum())
+    diff = len(full) - len(df)
+    if os.path.exists(HOLDOUT_FILE):
+        print(f"(a hold-out file exists: {diff:,} fewer rows in splits than in the cleaned file is expected)")
+    elif diff < 0 or diff > n_syn:
+        flag("WARN", f"cleaned file has {len(full):,} rows but splits have {len(df):,}: "
+                     "splits are stale or incomplete (re-run split.py)")
+    elif diff > 0:
+        print(f"({diff:,} synthetic row(s) were dropped by split.py because their group "
+              "fell into val/test: expected)")
     if bad_labels:
         flag("FAIL", f"unexpected label values: {bad_labels}")
     if nulls:
@@ -183,6 +197,8 @@ def section_construction(df: pd.DataFrame) -> None:
     )
     g.index = ["benign", "malicious"]
     print(g.round(3).to_string())
+    print("(note: rows without an observed scheme, e.g. Tranco, count as not-https here; "
+          "scheme is not a model feature)")                                    # v2:
     REPORT["construction"] = g.round(4).to_dict()
 
     https_gap = abs(g.loc["benign", "https_rate"] - g.loc["malicious", "https_rate"])
@@ -198,12 +214,21 @@ def section_construction(df: pd.DataFrame) -> None:
                      "in preprocessing, so num_upper carries no information")
 
     if "label_type" in df.columns and df["label_type"].notna().any():
-        print("\nBy label_type (from reference file):")
+        print("\nBy label_type:")
         t = df.groupby("label_type").agg(
             n=("url", "size"), https=("is_https", "mean"),
             path=("has_path", "mean"), med_len=("url_len", "median"))
         print(t.round(3).to_string())
         REPORT["by_label_type"] = t.round(4).to_dict()
+
+    if "source" in df.columns:                                                 # v2: per source
+        print("\nBy source:")
+        t = df.groupby("source").agg(
+            n=("url", "size"), label=("label", "mean"), https=("is_https", "mean"),
+            path=("has_path", "mean"), query=("has_query", "mean"),
+            med_len=("url_len", "median"))
+        print(t.round(3).to_string())
+        REPORT["by_source"] = t.round(4).to_dict()
 
 
 def section_tld(df: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) -> None:
@@ -223,15 +248,18 @@ def section_tld(df: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) -> No
         flag("WARN", f"{pct(com_b)} of benign URLs are .com: regional sites "
                      "(.lk, .in, ...) are under-represented")
 
-    # suffix-only baseline: how far does the TLD alone get you?
+    # suffix-only baseline: how far does the TLD alone get you? (train -> test, honest)
     maj = train.groupby("suffix")["label"].mean().ge(0.5).astype(int)
     pred = test["suffix"].map(maj)
     cov  = pred.notna().mean()
     acc  = float((pred[pred.notna()] == test.loc[pred.notna(), "label"]).mean())
-    print(f"\nSuffix-only lookup: covers {pct(cov)} of test rows, "
+    print(f"\nSuffix-only lookup (train -> test): covers {pct(cov)} of test rows, "
           f"accuracy on covered rows {pct(acc)}")
     REPORT["suffix_only_baseline"] = {"coverage": round(float(cov), 4),
                                       "accuracy": round(acc, 4)}
+    if acc > SHORTCUT_ACC_WARN:                                                # v2:
+        flag("WARN", f"the TLD alone predicts the class with {pct(acc)} accuracy on test: "
+                     "check with the ablation whether the model leans on TLD features")
     unseen = test[~test["suffix"].isin(train["suffix"])]
     print(f"Test rows with a suffix never seen in train: {len(unseen):,}")
 
@@ -245,10 +273,13 @@ def section_domains(df: pd.DataFrame, train: pd.DataFrame, val: pd.DataFrame,
     for name, part in (("val", val), ("test", test)):
         seen = part[key].isin(train_dom)
         share = float(seen.mean())
-        print(f"{name}: {pct(share)} of rows share a registered domain with train "
+        print(f"{name}: {pct(share)} of rows share a '{key}' with train "
               f"({int(seen.sum()):,} rows)")
         REPORT[f"{name}_domain_overlap"] = round(share, 4)
-        if name == "test" and share > OVERLAP_WARN:
+        if share > 0 and key == "group_key":                                   # v2: must be 0
+            flag("FAIL", f"{name} shares {pct(share)} of its group_keys with train: "
+                         "the split is leaking")
+        elif name == "test" and share > OVERLAP_WARN:
             flag("WARN", f"{pct(share)} of test rows come from domains seen in "
                          "training: metrics are inflated. Split by registered_domain")
 
@@ -336,27 +367,8 @@ def section_baselines(train: pd.DataFrame, test: pd.DataFrame) -> None:
 
 # ───────────────────────── main ─────────────────────────
 def main() -> None:
-    global CLEANED, REFERENCE, SPLIT_PATHS
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--cleaned", help="cleaned CSV (default: data/processed/cleaned_urls.csv)")
-    ap.add_argument("--splits-dir", help="folder with train/val/test_urls.csv")
-    ap.add_argument("--reference", help="reference CSV with label types (optional)")
-    a = ap.parse_args()
-    if a.cleaned:
-        CLEANED = a.cleaned
-    if a.reference:
-        REFERENCE = a.reference
-    if a.splits_dir:
-        SPLIT_PATHS = {k: os.path.join(a.splits_dir, f"{k}_urls.csv") for k in SPLIT_PATHS}
     print("DATA AUDIT (read-only)")
     full, df = load()
-
-    ref = None
-    if "label_type" not in df.columns and os.path.exists(REFERENCE):
-        ref = pd.read_csv(REFERENCE, dtype=str).rename(columns={"label": "label_type"})
-        ref = ref.drop_duplicates(subset=["url"])
-        df = df.merge(ref[["url", "label_type"]], on="url", how="left")
 
     section_schema(full, df)
     if any(level == "FAIL" for level, _ in FINDINGS):
@@ -386,14 +398,15 @@ def main() -> None:
     section_near_dups(train, val, test)
     section_baselines(train, test)
 
-    if "label_type" in df.columns:
-        syn = df[(df["label_type"] == "synthetic_malicious")]
+    if "label_type" in df.columns:                                             # v2: new label name
+        syn = df[df["label_type"].isin(["synthetic_typosquat", "synthetic_malicious"])]
         if len(syn):
             header("8. SYNTHETIC URLS PER SPLIT")
             s = syn.groupby("split").size()
             print(s.to_string())
-            share = float((test["label_type"] == "synthetic_malicious").sum()
-                          / max(1, (test["label"] == 1).sum()))
+            n_syn_test = int(test["label_type"].isin(
+                ["synthetic_typosquat", "synthetic_malicious"]).sum())
+            share = float(n_syn_test / max(1, (test["label"] == 1).sum()))
             print(f"Synthetic share of malicious TEST rows: {pct(share)}")
             REPORT["synthetic_share_of_malicious_test"] = round(share, 4)
             if share > 0:
