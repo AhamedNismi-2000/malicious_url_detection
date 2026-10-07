@@ -11,6 +11,8 @@ Reads   data/splits_v2/train_urls.csv, val_urls.csv, test_urls.csv
 Writes  features/features_{train,val,test}.npz
         models/vectorizer_char.joblib, vectorizer_word.joblib, scaler.joblib
         models/feature_config.json
+        features/features_heldout.npz   (challenge set: held-out typosquat techniques,
+                                         from data/raw/synthetic_heldout.csv, if present)
 
 CHANGES IN THIS VERSION  (marked "# v2:" in the code)
   1. Reads data/splits_v2 (the new leakage-checked split).
@@ -22,6 +24,9 @@ CHANGES IN THIS VERSION  (marked "# v2:" in the code)
   4. The URL is normalised (scheme and leading "www." removed) before features are
      computed, so training (scheme-less data) and serving (full URLs) see the same input.
   5. Writes models/feature_config.json with the exact feature names and counts.
+  6. Also converts data/raw/synthetic_heldout.csv (techniques the model never trains on)
+     into features_heldout.npz with the already-fitted vectorizers/scaler. It is an
+     EVALUATION-ONLY set: nothing is fitted on it.
 
 Feature breakdown (total: 564):
   Structural heuristics   : 39
@@ -98,6 +103,13 @@ CHAR_VEC_PATH = os.path.join(MODELS_DIR, "vectorizer_char.joblib")
 WORD_VEC_PATH = os.path.join(MODELS_DIR, "vectorizer_word.joblib")
 SCALER_PATH   = os.path.join(MODELS_DIR, "scaler.joblib")
 CONFIG_PATH   = os.path.join(MODELS_DIR, "feature_config.json")     # v2:
+
+# v2: evaluation-only sets (name, csv with a "url" column that are ALL malicious, output)
+CHALLENGE_SETS = [
+    ("HELDOUT TECHNIQUES",
+     os.path.join(BASE_DIR, "data", "raw", "synthetic_heldout.csv"),
+     os.path.join(FEATURES_DIR, "features_heldout")),
+]
 
 # ─────────────────────────── LOGGING ─────────────────────────
 logging.basicConfig(
@@ -903,10 +915,10 @@ def save_features(path, X, y, feature_names):
     )
 
 
-def save_feature_config(feature_names: list) -> None:
+def save_feature_config(feature_names: list, n_char: int, n_word: int) -> None:
     """v2: one file that says exactly which features the model expects."""
     cfg = dict(
-        n_heuristic=N_HEURISTIC, n_char=MAX_FEAT_CHAR, n_word=MAX_FEAT_WORD,
+        n_heuristic=N_HEURISTIC, n_char=n_char, n_word=n_word,
         n_total=len(feature_names),
         heuristic_feature_names=HEURISTIC_FEATURE_NAMES,
         typosquat_feature_names=ts.FEATURE_NAMES,
@@ -961,6 +973,22 @@ def process_split(name, path, char_vec, word_vec,
     gc.collect()
 
 
+def process_challenge(name, csv_path, char_vec, word_vec, scaler, feature_names, out_path):
+    """v2: features for an evaluation-only set (all rows malicious). Uses the vectorizers
+    and scaler fitted on TRAIN; nothing is fitted here."""
+    logger.info(f"\n{'='*60}\nProcessing challenge set {name}: {csv_path}\n{'='*60}")
+    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+    df = df[df["url"].str.len() > 0].reset_index(drop=True)
+    urls = df["url"].tolist()
+    y = np.ones(len(urls), dtype=np.int8)
+    logger.info(f"   {name}: {len(urls):,} URLs (all malicious)")
+    heur = scaler.transform(extract_heuristic_batch(urls)).astype(np.float32)
+    nlp = transform_nlp(urls, char_vec, word_vec)
+    X = combine_features(heur, nlp)
+    logger.info(f"   Final shape: {X.shape}")
+    save_features(out_path, X, y, feature_names)
+
+
 # ═══════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════
@@ -981,14 +1009,6 @@ def main():
 
     ts.get_index()      # v2: stop here, loudly, if data/reference/popular_domains.csv is missing
 
-    feature_names = (
-        HEURISTIC_FEATURE_NAMES
-        + [f"char_{i}" for i in range(MAX_FEAT_CHAR)]
-        + [f"word_{i}" for i in range(MAX_FEAT_WORD)]
-    )
-    logger.info(f"Total feature names: {len(feature_names):,}")
-    save_feature_config(feature_names)                           # v2:
-
     scaler = StandardScaler()
 
     logger.info("\nLoading train URLs to fit vectorizers...")
@@ -1001,6 +1021,18 @@ def main():
     char_vec, word_vec = fit_vectorizers(train_urls)
     joblib.dump(char_vec, CHAR_VEC_PATH)
     joblib.dump(word_vec, WORD_VEC_PATH)
+
+    # v2: feature names follow the REAL vocabulary sizes (a vectorizer can end up with fewer
+    # than MAX_FEAT_* terms), so the names always match the matrix columns exactly.
+    n_char, n_word = len(char_vec.vocabulary_), len(word_vec.vocabulary_)
+    feature_names = (
+        HEURISTIC_FEATURE_NAMES
+        + [f"char_{i}" for i in range(n_char)]
+        + [f"word_{i}" for i in range(n_word)]
+    )
+    logger.info(f"Total feature names: {len(feature_names):,} "
+                f"({N_HEURISTIC} heuristic + {n_char} char + {n_word} word)")
+    save_feature_config(feature_names, n_char, n_word)
     del train_urls, df_train
     gc.collect()
 
@@ -1010,6 +1042,12 @@ def main():
                   scaler, feature_names, VAL_OUT,   fit_scaler=False)
     process_split("TEST",  TEST_PATH,  char_vec, word_vec,
                   scaler, feature_names, TEST_OUT,  fit_scaler=False)
+
+    for cname, cpath, cout in CHALLENGE_SETS:                    # v2: evaluation-only sets
+        if os.path.exists(cpath):
+            process_challenge(cname, cpath, char_vec, word_vec, scaler, feature_names, cout)
+        else:
+            logger.warning(f"Challenge set not found (skipped): {cpath}")
 
     logger.info("\n" + "="*60)
     logger.info("DONE - Run train_model.py next")
