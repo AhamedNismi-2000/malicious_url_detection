@@ -16,21 +16,28 @@ from app.model_loader import classifier
 
 FEATURE_NAMES = (
     [
-        "url_len", "path_len", "num_dots", "path_dots", "num_hyphens",
-        "num_underscores", "num_at", "num_qmark", "num_equal", "num_amp",
-        "num_percent", "num_digits", "num_letters", "num_subdirs", "num_frag",
-        "num_special", "num_repeating", "num_upper", "num_non_ascii",
-        "num_slashes", "num_params", "ratio_digits", "ratio_letters",
-        "url_entropy", "ip_flag", "subdomain_parts", "has_multi_subdomain",
-        "tld_len", "risky_tld", "https_flag", "shortened", "sus_words",
-        "brand_mismatch", "puny", "susp_ext", "suspicious_port",
-        "max_consonants", "max_vowels", "max_digits",
-        "leet_speak_score", "homoglyph_suspicious", "encoding_ratio",
-        "punycode_suspicious", "subdomain_spam_score", "visual_brand_similarity",
-        "brand_in_domain", "leet_in_domain", "brand_hyphen_suspicious",
+           # 39 structural
+            "url_len","path_len","num_dots","path_dots","num_hyphens",
+            "num_underscores","num_at","num_qmark","num_equal","num_amp",
+            "num_percent","num_digits","num_letters","num_subdirs","num_frag",
+            "num_special","num_repeating","num_upper","num_non_ascii",
+            "num_slashes","num_params","ratio_digits","ratio_letters",
+            "url_entropy","ip_flag","subdomain_parts","has_multi_subdomain",
+            "tld_len","risky_tld","https_flag","shortened","sus_words",
+            "brand_mismatch","puny","susp_ext","suspicious_port",
+            "max_consonants","max_vowels","max_digits",
+            "leet_speak_score","homoglyph_suspicious","encoding_ratio",
+            "punycode_suspicious","subdomain_spam_score","visual_brand_similarity",
+            "brand_in_domain","leet_in_domain","brand_hyphen_suspicious",
+            "domain_len","domain_digit_ratio","max_domain_digits","path_depth",
+            "has_redirect",
+            "double_slash_in_path",
+            "abnormal_subdomain",
+            "http_no_brand_no_age",
+            "leet_brand_score",
     ]
     + [f"char_{i}" for i in range(300)]
-    + [f"word_{i}" for i in range(200)]
+    + [f"word_{i}" for i in range(202)]
 )
 
 TEST_URLS = [
@@ -42,7 +49,7 @@ TEST_URLS = [
 ]
 
 
-def explain_url(url: str, num_features: int = 10) -> dict:
+def explain_url(url: str, num_features: int = 20) -> dict:
     """Return prediction + LIME explanation for a single URL."""
     result = classifier.explain_url(url, num_features=num_features)
     return result

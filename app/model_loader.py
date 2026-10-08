@@ -1,35 +1,40 @@
 """
-model_loader.py
----------------
+model_loader.py  (v2)
+---------------------
 Loads model artefacts and exposes three public methods:
 
   predict_url(url)                   -> dict
   predict_batch(urls)                -> list[dict]
   explain_url(url, num_features=30)  -> dict
 
-Prediction pipeline:
-  Layer 0: Smart Whitelist check (Tranco top 50k + manual list)
-  Layer 1: Google Safe Browsing API (known threats)
-  Layer 2: ML Model (Random Forest 559 features)
-  Layer 3: Domain Age post-prediction adjustment (WHOIS, cached)
+Run `python app/model_loader.py` (no arguments) to execute the built-in self-test.
 
-Fixes in this version:
-  - FIX 9:  Leet override — early return skips domain age (0.85 not crushed)
-  - FIX 11: Smart whitelist — trusted subdomains + bypass attack detection
-  - FIX 12: Suspicious word in domain label (phishing.ru, malware.tk)
-  - FIX 13: Brand impersonation + no HTTPS → force malicious
-  - FIX 14: Raw IP address + no HTTPS → force malicious
+Prediction pipeline (v2)
+  Layer 1: Google Safe Browsing (known threats). Runs for EVERY url, whitelisted or not.
+  Layer 2: Trust assessment. The whitelist is now a TRUST SIGNAL, not a bypass:
+           a trusted host gets a lower score, but it is still analysed. Trust is revoked
+           when there is evidence of badness (see assess_trust).
+  Layer 3: Rule layer (typosquat.py): lookalike / combosquat / brand-in-subdomain rules.
+  Layer 4: ML model (Random Forest, features listed in models/feature_config.json).
+  Layer 5: Overrides, clean-site dampening, trust multiplier, domain-age adjustment.
 
-All previous fixes retained:
-  - FIX 1:  https_flag backup threshold -0.1
-  - FIX 2:  explain_url skips https_flag when site has HTTPS
-  - FIX 3:  feature_to_natural_language validates flag values
-  - FIX 4:  _classify reduces confidence for clean HTTP sites
-  - FIX 5:  brand reason skipped when no brand detected
-  - FIX 6:  Google Safe Browsing API layer
-  - FIX 7:  Domain age WHOIS post-prediction adjustment (cached)
-  - FIX 8:  Dynamic leet brand detection (no hardcoded map)
-  - FIX 10: Updated for 559 features
+How a trusted URL can still be MALICIOUS
+  - Google Safe Browsing says so,
+  - a rule hit or hard evidence appears (e.g. user@host trick, lookalike of another brand),
+  - the redirect target in the query string is malicious,
+  - the raw model probability is above TRUST_FLIP_PROBA (very high).
+  Trust only ever LOWERS the score; it never raises it and never skips the checks above.
+
+Response format is unchanged (url, prediction, confidence, threshold, source, ...).
+New optional keys: whitelisted (bool), trust ("strong"/"weak"), risk_score, rules, evidence.
+
+Kept from the previous version: FIX 4 (clean-site dampening), FIX 6 (GSB), FIX 7 (domain
+age, cached), FIX 9 (leet), FIX 12 (suspicious words in the domain label), FIX 13 (brand +
+no HTTPS), FIX 14 (raw IP + no HTTPS). What changed in them (marked "# v2:"):
+  - "no HTTPS" now comes from the REAL scheme of the URL. The model features are
+    scheme-independent (feature_extraction v2), so https_flag is always 0 there.
+  - FIX 9/13/14 are not applied to strongly trusted hosts.
+  - Domain age is skipped for strongly trusted hosts (saves WHOIS calls).
 """
 
 import json
@@ -41,6 +46,7 @@ import threading
 import warnings
 from typing import Optional
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, parse_qsl, unquote
 
 import joblib
 import numpy as np
@@ -72,28 +78,78 @@ from feature_extraction import (
     LEET_DECODE_MAP,
     decode_leet,
 )
+import typosquat as ts                                            # v2:
 
 # ── Path constants ────────────────────────────────────────────────────────────
 MODELS_DIR            = os.path.join(_ROOT, "models")
 DATA_DIR              = os.path.join(_ROOT, "data")
 DOMAIN_AGE_CACHE_PATH = os.path.join(MODELS_DIR, "domain_age_cache.json")
+FEATURE_CONFIG_PATH   = os.path.join(MODELS_DIR, "feature_config.json")   # v2:
 
 # ── Google Safe Browsing ──────────────────────────────────────────────────────
 GSB_API_KEY = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY", "")
 GSB_URL     = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
-# ── Feature names ─────────────────────────────────────────────────────────────
-HEURISTIC_FEATURES: list[str] = HEURISTIC_FEATURE_NAMES   # 57
+# ═════════════════════════ v2 SETTINGS (edit here, then restart the API) ═════════════════════════
+WHOIS_ENABLED   = True      # False = never look up domain age (faster, fewer dependencies)
+GSB_FOR_TRUSTED = True      # run Google Safe Browsing also for whitelisted hosts
 
-FEATURE_NAMES: list[str] = (
-    HEURISTIC_FEATURES
-    + [f"char_{i}" for i in range(300)]
-    + [f"word_{i}" for i in range(202)]
-)
+# Trust only LOWERS the model score. The multiplier is applied to the probability.
+TRUST_MULTIPLIER = {"strong": 0.50, "weak": 0.80}
+# ...unless the raw model probability is this high: then trust is ignored (very high = flip).
+TRUST_FLIP_PROBA = {"strong": 0.95, "weak": 0.90}
+
+# Rule layer (typosquat.py). A hard hit forces MALICIOUS, a soft hit raises the score.
+RULE_HARD_SCORE  = 0.85     # homoglyph, hyphen/www tricks, combosquat+keyword, brand in subdomain...
+RULE_SOFT_SCORE  = 0.60     # edit distance 2 and similar
+RULE_HARD_FLOOR  = 0.90     # probability a hard hit is raised to
+RULE_SOFT_BUMP   = 0.20
+
+# Evidence of badness found in the URL itself. Soft evidence adds to the score.
+EVIDENCE_BUMP = {"idn_punycode": 0.25, "offsite_redirect": 0.15, "sub_spoof": 0.30}
+
+# FIX 4: dampening for URLs where every heuristic red flag is 0 (1.0 = off).
+# v2: OFF by default. It was tuned for the old model. With the new model most real phishing
+# looks "clean" (no red flag), so 0.35-0.55 would turn almost every model detection below
+# the threshold, on top of a threshold that already limits false positives (FPR < 5%).
+# Re-enable (old values 0.55 / 0.35) only if a regression set shows too many false positives.
+CLEAN_DAMPEN_HTTP  = 1.0
+CLEAN_DAMPEN_HTTPS = 1.0
+
+# Academic / government suffixes: weak trust only (they used to bypass the model).
+ACADEMIC_GOV_SUFFIXES = {
+    "ac.lk", "edu.lk", "gov.lk", "ac.uk", "gov.uk", "edu.au", "gov.au", "ac.nz",
+    "edu", "gov", "mil", "ac.in", "edu.in", "ac.jp", "ac.kr",
+}
+# Hosts where the subdomain ("tenant") is chosen by whoever signs up: never trusted.
+SHARED_PLATFORMS = set(ts.SHARED_PLATFORMS) | {
+    "medium.com", "substack.com", "github.com.cn", "vercel.com", "netlify.com",
+    "herokuapp.com", "pythonanywhere.com", "ngrok.io", "ngrok-free.app", "bubbleapps.io",
+}
+REDIRECT_KEYS = {"url", "redirect", "next", "goto", "return", "returnurl", "returnto",
+                 "continue", "dest", "destination", "redir", "redirect_uri", "callback",
+                 "q", "target", "link", "u", "r", "to", "out", "forward"}
+
+# ── Feature names (from feature_config.json so they always match the trained model) ──
+def _load_feature_names() -> list:
+    if os.path.exists(FEATURE_CONFIG_PATH):
+        with open(FEATURE_CONFIG_PATH, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        return (list(cfg["heuristic_feature_names"])
+                + [f"char_{i}" for i in range(cfg["n_char"])]
+                + [f"word_{i}" for i in range(cfg["n_word"])])
+    warnings.warn(f"{FEATURE_CONFIG_PATH} not found: assuming 300 char + 202 word features",
+                  RuntimeWarning)
+    return (list(HEURISTIC_FEATURE_NAMES)
+            + [f"char_{i}" for i in range(300)] + [f"word_{i}" for i in range(202)])
+
+
+HEURISTIC_FEATURES: list = list(HEURISTIC_FEATURE_NAMES)          # v2: 62
+FEATURE_NAMES: list = _load_feature_names()                       # v2: dynamic
 
 _FEAT_IDX = {name: i for i, name in enumerate(HEURISTIC_FEATURES)}
 
-_CATEGORICAL_FEATURE_NAMES: list[str] = [
+_CATEGORICAL_FEATURE_NAMES: list = [
     "ip_flag", "has_multi_subdomain", "risky_tld", "https_flag",
     "shortened", "sus_words", "brand_mismatch", "puny", "susp_ext",
     "suspicious_port", "brand_in_domain", "leet_in_domain",
@@ -103,7 +159,7 @@ _CATEGORICAL_FEATURE_NAMES: list[str] = [
 ]
 
 # FIX 12: words that should never appear in a legitimate domain label
-_DOMAIN_SUSPICIOUS_WORDS: set[str] = {
+_DOMAIN_SUSPICIOUS_WORDS: set = {
     "phishing", "malware", "trojan", "virus", "hack",
     "steal", "crack", "cheat", "fraud", "scam",
     "evil", "danger", "threat", "attack", "exploit",
@@ -119,7 +175,7 @@ _PRIVATE_IP_RE = re.compile(
 # ── TLDExtract instance ───────────────────────────────────────────────────────
 _EXTRACTOR = _tldextract.TLDExtract(cache_dir=None, suffix_list_urls=None)
 
-# ── Brand map ─────────────────────────────────────────────────────────────────
+# ── Brand map (display names) ─────────────────────────────────────────────────
 BRAND_MAP = {
     "paypal"       : ("PayPal",          "paypal.com"),
     "amazon"       : ("Amazon",          "amazon.com"),
@@ -146,8 +202,8 @@ BRAND_MAP = {
     "ups"          : ("UPS",             "ups.com"),
 }
 
-# ── FIX 11: Trusted subdomain prefixes ───────────────────────────────────────
-TRUSTED_SUBDOMAIN_PREFIXES: set[str] = {
+# ── Trusted subdomain prefixes ────────────────────────────────────────────────
+TRUSTED_SUBDOMAIN_PREFIXES: set = {
     "www", "mail", "email", "webmail",
     "docs", "doc", "help", "support", "status",
     "api", "apis", "dev", "developer", "developers",
@@ -164,12 +220,11 @@ TRUSTED_SUBDOMAIN_PREFIXES: set[str] = {
     "en", "us", "uk", "au", "ca", "in", "de", "fr",
     "cloud", "aws", "azure",
     "v1", "v2", "v3",
-    
 }
 
 
 # ════════════════════════════════════════════════════════════════
-# WHITELIST — LOAD
+# WHITELIST — LOAD  (now a trust signal, see assess_trust)
 # ════════════════════════════════════════════════════════════════
 
 def _load_whitelist() -> set:
@@ -231,7 +286,7 @@ def _load_whitelist() -> set:
         print(f"[Whitelist] whitelist.txt not found — using manual list "
               f"({len(whitelist)} domains)")
 
-    # FIX: Remove URL shorteners — they must go to ML, not bypass it
+    # URL shorteners must go to the model, never be trusted
     whitelist = whitelist - SHORTENERS
     return whitelist
 
@@ -240,70 +295,87 @@ WHITELIST = _load_whitelist()
 
 
 # ════════════════════════════════════════════════════════════════
-# FIX 11: SMART WHITELIST CHECK
+# v2: URL PARSING AND TRUST ASSESSMENT
 # ════════════════════════════════════════════════════════════════
 
-def _is_safe_whitelist_url(url: str) -> bool:
-    """
-    Smart whitelist check — fixes subdomain handling and bypass attacks.
+_IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
-    Returns True (BENIGN) only when:
-      - registered domain is whitelisted AND
-      - subdomain is either absent or all parts are trusted prefixes AND
-      - no brand spoofing in subdomain
-    """
+
+def parse_url(url: str) -> dict:
+    """Parse once, correctly (userinfo, port, www), and reuse everywhere."""
+    s = str(url).strip()
+    has_scheme = "://" in s
+    sp = urlsplit(s if has_scheme else "//" + s)
     try:
-        cleaned    = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
-        host       = cleaned.split("/")[0].split(":")[0].lower()
-        ext        = _EXTRACTOR(host)
-        registered = ext.registered_domain or ""
-        subdomain  = (ext.subdomain or "").strip()
+        host = (sp.hostname or "").lower().rstrip(".")
+    except ValueError:
+        host = ""
+    ext = _EXTRACTOR(host) if host else _EXTRACTOR("")
+    registered = ext.registered_domain or host
+    sub_parts = [p for p in (ext.subdomain or "").split(".") if p and p != "www"]
+    userinfo = sp.netloc.rsplit("@", 1)[0] if "@" in sp.netloc else ""
+    return dict(url=s, scheme=sp.scheme.lower() if has_scheme else "", host=host,
+                registered=registered, suffix=ext.suffix or "", label=ext.domain or "",
+                sub_parts=sub_parts, userinfo=userinfo, path=sp.path or "",
+                query=sp.query or "", is_ip=bool(_IPV4_RE.match(host)) or ":" in host)
 
-        # Step 1: academic/government TLDs — trust all subdomains
-        _SAFE_TLDS = {
-            "ac.lk", "edu.lk", "gov.lk",
-            "ac.uk", "gov.uk",
-            "edu.au", "gov.au", "ac.nz",
-            "edu", "gov", "mil",
-            "ac.in", "edu.in",
-            "ac.jp", "ac.kr",
-        }
-        is_safe_tld = any(
-            registered.endswith("." + tld) or registered == tld
-            for tld in _SAFE_TLDS
-        )
-        if is_safe_tld:
-            return True
 
-        if registered not in WHITELIST:
-            return False
+def _redirect_target(p: dict) -> Optional[str]:
+    """First query value that is a URL (or host/path) pointing to ANOTHER registered domain."""
+    for key, val in parse_qsl(p["query"], keep_blank_values=False):
+        if key.lower() not in REDIRECT_KEYS or not val:
+            continue
+        v = unquote(val).strip()
+        cand = v if "://" in v else ("http://" + v if re.match(r"^[\w.-]+\.[a-z]{2,}(/|$)", v, re.I) else "")
+        if not cand:
+            continue
+        tp = parse_url(cand)
+        if tp["host"] and tp["registered"] != p["registered"]:
+            return cand
+    return None
 
-        # Step 2: no subdomain at all → clean root domain → safe
-        if not subdomain:
-            return True
 
-        sub_parts = [p for p in subdomain.split(".") if p and p != "www"]
-        if not sub_parts:
-            return True
+def assess_trust(p: dict) -> dict:
+    """Return {"level": "strong"|"weak"|"none", "evidence": [codes], "redirect_target": url|None}.
 
-        # Check for brand spoofing in subdomain
-        for part in sub_parts:
-            for wl_domain in WHITELIST:
-                wl_label = wl_domain.split(".")[0]
-                if part == wl_label and registered != wl_domain:
-                    return False
-            for brand_key in BRAND_MAP:
-                if part == brand_key and registered not in REAL_BRAND_DOMAINS:
-                    return False
+    The whitelist grants trust only when nothing in the URL contradicts it:
+      userinfo_domain  http://google.com@evil.tk  (the part before @ looks like a domain)
+      idn_punycode     xn-- or non-ASCII host
+      offsite_redirect a redirect parameter pointing to a different registered domain
+      sub_spoof        a different brand's name used as a subdomain (paypal.google.com)
+      shared_platform_tenant  x.github.io, x.weebly.com ...  (the tenant is not the owner)
+      ip_host          raw IP address
+    """
+    evidence: list = []
+    host, reg = p["host"], p["registered"]
+    if p["userinfo"] and "." in p["userinfo"]:
+        evidence.append("userinfo_domain")
+    if "xn--" in host or any(ord(c) > 127 for c in host):
+        evidence.append("idn_punycode")
+    target = _redirect_target(p)
+    if target:
+        evidence.append("offsite_redirect")
+    if p["is_ip"]:
+        evidence.append("ip_host")
+    if reg in SHARED_PLATFORMS and p["sub_parts"]:
+        evidence.append("shared_platform_tenant")
 
-        # All subdomain parts must be trusted prefixes
-        if all(p in TRUSTED_SUBDOMAIN_PREFIXES for p in sub_parts):
-            return True
+    trusted_reg = reg in WHITELIST
+    if trusted_reg and p["sub_parts"]:
+        idx = ts.get_index()
+        for part in p["sub_parts"]:
+            b = idx.brands.get(part)
+            if b is not None and b.risk and b.domain != reg:
+                evidence.append("sub_spoof")
+                break
 
-        return False
-
-    except Exception:
-        return False
+    level = "none"
+    if not evidence:
+        if trusted_reg:
+            level = "strong" if all(x in TRUSTED_SUBDOMAIN_PREFIXES for x in p["sub_parts"]) else "weak"
+        elif p["suffix"] in ACADEMIC_GOV_SUFFIXES:
+            level = "weak"
+    return dict(level=level, evidence=evidence, redirect_target=target)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -474,6 +546,38 @@ _BACKUP_CHECKS = [
     ("path_depth",              3.0, "The URL has an unusually deep path — often used to mimic legitimate sites"),
 ]
 
+# v2: sentences for rule hits and evidence (shown first in "reasons")
+_TECHNIQUE_TEXT = {
+    "homoglyph": "This address copies {brand} using look-alike characters (the real site is {real})",
+    "hyphen_insert": "This address copies {brand} by splitting its name with a hyphen (the real site is {real})",
+    "dot_split": "This address copies {brand} by splitting its name with a dot (the real site is {real})",
+    "www_prefix": "This address copies {brand} with a 'www' glued to the name (the real site is {real})",
+    "combosquat_keyword": "This address combines the name {brand} with words like 'secure' or 'login', a common phishing trick (the real site is {real})",
+    "combosquat": "This address combines the name {brand} with extra words (the real site is {real})",
+    "brand_domain_in_subdomain": "The address starts with {real}, but the site itself belongs to a different domain",
+    "brand_in_subdomain": "The name {brand} is only a prefix: the site itself belongs to a different domain (the real site is {real})",
+    "tld_swap": "This address uses the name {brand} with a different domain ending (the real site is {real})",
+    "brand_in_path": "The page path mentions {brand}, but this site is not {real}",
+    "brand_substring": "The domain name hides the brand name {brand}",
+}
+_MISSPELLING = {"transposition", "keyboard_adjacent", "bitsquat", "doubled_letter", "dropped_letter",
+                "substitution", "insertion", "plural", "edit_distance_2"}
+_EVIDENCE_TEXT = {
+    "userinfo_domain": "The address contains an '@' that makes it look like another website",
+    "idn_punycode": "The address uses international characters that can disguise its real name",
+    "offsite_redirect": "The link redirects to a different website",
+    "sub_spoof": "A well-known brand name is used as a prefix on a different website",
+    "redirect_to_malicious": "The link redirects to a website that looks malicious",
+}
+
+
+def rule_reason(m: dict) -> str:
+    brand = BRAND_MAP.get(m["brand"], (m["brand"].title(), m["brand_domain"]))[0]
+    tpl = _TECHNIQUE_TEXT.get(m["technique"])
+    if tpl is None and m["technique"] in _MISSPELLING:
+        tpl = "This address is a misspelling of {brand} (the real site is {real})"
+    return (tpl or "This address imitates {brand}").format(brand=brand, real=m["brand_domain"])
+
 
 # ════════════════════════════════════════════════════════════════
 # DOMAIN AGE — WHOIS WITH PERSISTENT CACHE
@@ -505,7 +609,7 @@ def _save_domain_age_cache():
 
 
 def get_domain_age_days(domain: str) -> int:
-    if not domain:
+    if not domain or not WHOIS_ENABLED:                              # v2:
         return -1
     if domain in _domain_age_cache:
         return _domain_age_cache[domain]
@@ -529,7 +633,7 @@ def get_domain_age_days(domain: str) -> int:
     return age
 
 
-def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, str]:
+def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple:
     age = get_domain_age_days(domain)
     if age < 0:
         return proba, "unknown"
@@ -552,7 +656,7 @@ def adjust_confidence_by_domain_age(proba: float, domain: str) -> tuple[float, s
 # GOOGLE SAFE BROWSING
 # ════════════════════════════════════════════════════════════════
 
-def check_google_safe_browsing(url: str) -> tuple[bool, str]:
+def check_google_safe_browsing(url: str) -> tuple:
     if not GSB_API_KEY:
         return False, ""
     try:
@@ -578,36 +682,30 @@ def check_google_safe_browsing(url: str) -> tuple[bool, str]:
 
 
 # ════════════════════════════════════════════════════════════════
-# BRAND DETECTION
+# BRAND DETECTION  (v2: token based, so "groups.google.com" no longer matches "ups")
 # ════════════════════════════════════════════════════════════════
 
-def detect_brand(url: str) -> tuple[Optional[str], Optional[str]]:
-    url_lower = url.lower()
+def detect_brand(url: str, ts_result: Optional[dict] = None) -> tuple:
+    """Return (display name, real domain) of the brand the URL imitates, or (None, None)."""
+    if ts_result and ts_result.get("brand"):
+        label = ts_result["brand"]
+        disp = BRAND_MAP.get(label, (label.title(), ts_result["brand_domain"]))[0]
+        return disp, ts_result["brand_domain"]
 
-    for keyword, (display_name, real_domain) in BRAND_MAP.items():
-        if keyword in url_lower:
-            host = re.sub(r"^https?://", "", url_lower).split("/")[0]
-            reg  = ".".join(host.split(".")[-2:]) if "." in host else host
-            if reg != real_domain and reg not in REAL_BRAND_DOMAINS:
-                return display_name, real_domain
-
+    p = parse_url(url)
+    if p["registered"] in REAL_BRAND_DOMAINS:
+        return None, None
+    tokens = [t for t in re.split(r"[^a-z0-9]+", (p["host"] + " " + p["path"]).lower()) if t]
+    for tok in tokens:
+        if tok in BRAND_MAP and p["registered"] != BRAND_MAP[tok][1]:
+            return BRAND_MAP[tok]
     try:
-        host  = re.sub(r"^https?://", "", url_lower).split("/")[0].split(":")[0]
-        parts = host.split(".")
-        for part in parts[:-1]:
-            if not part:
-                continue
-            for candidate in decode_leet(part):
-                if candidate == part:
-                    continue
-                for brand_key, (display_name, real_domain) in BRAND_MAP.items():
-                    if brand_key in candidate:
-                        reg = ".".join(parts[-2:]) if len(parts) >= 2 else host
-                        if reg not in REAL_BRAND_DOMAINS:
-                            return display_name, real_domain
+        for tok in tokens:
+            for candidate in decode_leet(tok):
+                if candidate != tok and candidate in BRAND_MAP and p["registered"] not in REAL_BRAND_DOMAINS:
+                    return BRAND_MAP[candidate]
     except Exception:
         pass
-
     return None, None
 
 
@@ -669,7 +767,7 @@ def _build_backup_reasons(
     real_domain: Optional[str],
     existing: set,
     needed: int,
-) -> list[str]:
+) -> list:
     bn, rd  = brand_name or "a known brand", real_domain or "the official website"
     reasons = []
     for feat_name, threshold, template in _BACKUP_CHECKS:
@@ -681,6 +779,8 @@ def _build_backup_reasons(
         val       = heuristic[idx]
         triggered = val < abs(threshold) if threshold < 0 else val >= threshold
         if not triggered:
+            continue
+        if feat_name == "https_flag":                              # v2: features have no scheme
             continue
         if brand_name is None and any(
             x in feat_name for x in ["brand", "leet_brand", "visual"]
@@ -707,7 +807,7 @@ def reverse_dns(ip: str, timeout: int = 3) -> Optional[str]:
         return None
 
 
-def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
+def unshorten_url(url: str, timeout: int = 5) -> tuple:
     try:
         resp = requests.head(
             url, allow_redirects=True, timeout=timeout,
@@ -722,25 +822,16 @@ def unshorten_url(url: str, timeout: int = 5) -> tuple[str, bool]:
 
 def _is_shortener(url: str) -> bool:
     try:
-        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
-        host    = cleaned.split("/")[0].split(":")[0].lower()
-        parts   = host.split(".")
-        rd      = ".".join(parts[-2:]) if len(parts) >= 2 else host
-        return rd in SHORTENERS or host in SHORTENERS
+        p = parse_url(url)
+        return p["registered"] in SHORTENERS or p["host"] in SHORTENERS
     except Exception:
         return False
 
 
 def _extract_ip(url: str) -> Optional[str]:
     try:
-        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
-        host    = cleaned.split("/")[0].split(":")[0].strip("[]")
-        parts   = host.split(".")
-        if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
-            return host
-        if ":" in host:
-            return host
-        return None
+        p = parse_url(url)
+        return p["host"] if p["is_ip"] else None
     except Exception:
         return None
 
@@ -774,6 +865,13 @@ class URLClassifier:
         with open(os.path.join(MODELS_DIR, "threshold.json")) as fh:
             self.threshold = float(json.load(fh).get("threshold", 0.45))
 
+        # v2: the model, the scaler and feature_config.json must come from the same run
+        if self.model.n_features_in_ != len(FEATURE_NAMES):
+            raise RuntimeError(
+                f"model expects {self.model.n_features_in_} features but feature_config.json "
+                f"describes {len(FEATURE_NAMES)}: re-run feature_extraction.py and train_model.py")
+        ts.get_index()                                              # v2: fail early, warm the index
+
         self._explainer      = None
         self._explainer_lock = threading.Lock()
 
@@ -788,12 +886,8 @@ class URLClassifier:
 
     @staticmethod
     def _registered_domain(url: str) -> str:
-        cleaned = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
-        host    = cleaned.split("/")[0].split(":")[0].split("?")[0].lower()
-        if host.startswith("www."):
-            host = host[4:]
-        parts = host.split(".")
-        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+        """v2: public-suffix aware (co.uk, com.au ...), no longer the last two labels."""
+        return parse_url(url)["registered"]
 
     def _feature_vector(self, url: str) -> np.ndarray:
         h  = np.array(extract_heuristic_features(url), dtype=np.float32).reshape(1, -1)
@@ -803,216 +897,190 @@ class URLClassifier:
         w  = self.vec_word.transform([s]).toarray().flatten()
         return np.concatenate([hs, c, w])
 
-    # ── _classify ─────────────────────────────────────────────────────────────
+    # ── scoring ───────────────────────────────────────────────────────────────
 
-    def _classify(self, url: str) -> dict:
-        try:
-            fv    = self._feature_vector(url)
-            proba = float(self.model.predict_proba(fv.reshape(1, -1))[0][1])
+    def _score(self, url: str, p: dict, trust: dict, rules: dict) -> dict:
+        """Model probability plus rules, overrides, dampening, trust and domain age."""
+        fv        = self._feature_vector(url)
+        raw_proba = float(self.model.predict_proba(fv.reshape(1, -1))[0][1])
+        raw       = extract_heuristic_features(url)
+        is_https  = p["scheme"] == "https"                         # v2: the REAL scheme
+        level     = trust["level"]
+        proba     = raw_proba
+        flags     = lambda name: raw[_FEAT_IDX.get(name, -1)]
 
-            raw       = extract_heuristic_features(url)
-            https_val = raw[_FEAT_IDX.get("https_flag",      -1)]
-            leet_dom  = raw[_FEAT_IDX.get("leet_in_domain",  -1)]
-            leet_br   = raw[_FEAT_IDX.get("leet_brand_score",-1)]
+        ts_score = rules["score"] if rules["where"] != "path" else 0.0
+        hard_rule     = ts_score >= RULE_HARD_SCORE
+        soft_rule     = RULE_SOFT_SCORE <= ts_score < RULE_HARD_SCORE
+        hard_evidence = "userinfo_domain" in trust["evidence"]
 
-            # FIX 9: leet override — early return skips domain age
-            # Without early return: 0.85 × 0.3 (old domain) = 0.255 → BENIGN (bug)
-            leet_detected = (leet_dom == 1.0) or (leet_br == 1.0)
-            if leet_detected and https_val == 0.0:
-                proba = max(proba, 0.85)
-                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-                return {
-                    "prediction": label,
-                    "confidence": round(proba * 100, 2),
-                    "threshold" : round(self.threshold * 100, 2),
-                    "source"    : "model",
-                    "domain_age": "skipped_leet",
-                }
+        forced = None                       # name of the override that fired (skips age + trust)
+        if hard_rule or hard_evidence:
+            forced = "rule" if hard_rule else "evidence"
+            proba = max(proba, RULE_HARD_FLOOR)
+        elif level != "strong":             # v2: substring-based overrides never touch strong trust
+            domain_label = p["label"].lower()
+            leet_detected = (flags("leet_in_domain") == 1.0) or (flags("leet_brand_score") == 1.0)
+            if leet_detected and not is_https:                                          # FIX 9
+                forced, proba = "leet", max(proba, 0.85)
+            elif any(w in domain_label for w in _DOMAIN_SUSPICIOUS_WORDS):              # FIX 12
+                forced, proba = "suspicious_domain", max(proba, 0.90)
+            elif (flags("brand_in_domain") == 1.0 or flags("brand_mismatch") == 1.0) \
+                    and not is_https:                                                   # FIX 13
+                forced, proba = "brand_impersonation", max(proba, 0.85)
+            elif flags("ip_flag") == 1.0 and not is_https:                              # FIX 14
+                forced, proba = "ip", max(proba, 0.85)
 
-            # FIX 12: suspicious word in domain label
-            # e.g. phishing.ru, malware.tk, trojan.xyz
-            domain_label = self._registered_domain(url).split(".")[0].lower()
-            if any(w in domain_label for w in _DOMAIN_SUSPICIOUS_WORDS):
-                proba = max(proba, 0.90)
-                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-                return {
-                    "prediction": label,
-                    "confidence": round(proba * 100, 2),
-                    "threshold" : round(self.threshold * 100, 2),
-                    "source"    : "model",
-                    "domain_age": "skipped_suspicious_domain",
-                }
+        if forced:
+            return dict(proba=proba, raw_proba=raw_proba, age=f"skipped_{forced}",
+                        trust_applied=False, forced=forced)
 
-            # FIX 13: brand impersonation + no HTTPS
-            # e.g. microsoft-support-center.com (44.6% — just below threshold)
-            brand_in_dom   = raw[_FEAT_IDX.get("brand_in_domain",  -1)]
-            brand_mismatch = raw[_FEAT_IDX.get("brand_mismatch",   -1)]
-            if (brand_in_dom == 1.0 or brand_mismatch == 1.0) and https_val == 0.0:
-                proba = max(proba, 0.85)
-                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-                return {
-                    "prediction": label,
-                    "confidence": round(proba * 100, 2),
-                    "threshold" : round(self.threshold * 100, 2),
-                    "source"    : "model",
-                    "domain_age": "skipped_brand_impersonation",
-                }
+        # FIX 4: clean sites (no heuristic red flag, no rule hit) are dampened
+        other_flags = [
+            "brand_mismatch", "sus_words", "brand_in_domain", "risky_tld", "shortened",
+            "ip_flag", "puny", "leet_in_domain", "leet_brand_score",
+            "brand_hyphen_suspicious", "susp_ext", "suspicious_port", "has_redirect",
+            "double_slash_in_path", "abnormal_subdomain", "http_no_brand_no_age",
+        ]
+        is_clean = all(flags(f) == 0.0 for f in other_flags) and rules["score"] == 0.0
+        if is_clean and proba < 0.90:
+            proba *= CLEAN_DAMPEN_HTTPS if is_https else CLEAN_DAMPEN_HTTP
 
-            # FIX 14: raw IP address + no HTTPS
-            # e.g. http://185.220.101.45/steal/credentials (8.8% — way below threshold)
-            ip_flag_val = raw[_FEAT_IDX.get("ip_flag", -1)]
-            if ip_flag_val == 1.0 and https_val == 0.0:
-                proba = max(proba, 0.85)
-                label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-                return {
-                    "prediction": label,
-                    "confidence": round(proba * 100, 2),
-                    "threshold" : round(self.threshold * 100, 2),
-                    "source"    : "model",
-                    "domain_age": "skipped_ip",
-                }
+        if soft_rule:                                               # v2: soft rule hit
+            proba = min(1.0, proba + RULE_SOFT_BUMP)
+        for code in trust["evidence"]:                              # v2: soft evidence
+            proba = min(1.0, proba + EVIDENCE_BUMP.get(code, 0.0))
 
-            # FIX 4 (extended): reduce confidence for clean sites — HTTP or HTTPS —
-            # when every heuristic red-flag is 0 and the score is being driven mainly
-            # by TF-IDF noise rather than real signals.
-            other_flags = [
-                "brand_mismatch", "sus_words", "brand_in_domain",
-                "risky_tld", "shortened", "ip_flag", "puny",
-                "leet_in_domain", "leet_brand_score",
-                "brand_hyphen_suspicious", "susp_ext",
-                "suspicious_port", "has_redirect",
-                "double_slash_in_path", "abnormal_subdomain",
-                "http_no_brand_no_age",
-            ]
-            is_clean = all(raw[_FEAT_IDX.get(f, -1)] == 0.0 for f in other_flags)
+        trust_applied = False
+        if level != "none":                                         # v2: trust only lowers
+            if raw_proba >= TRUST_FLIP_PROBA[level]:
+                proba = max(proba, raw_proba)                       # very high: trust ignored
+            else:
+                proba *= TRUST_MULTIPLIER[level]
+                trust_applied = True
 
-            if is_clean and proba < 0.90:
-                if https_val == 0.0:
-                    proba *= 0.55       # HTTP clean site — moderate dampening
-                else:
-                    proba *= 0.35       # HTTPS clean site — stronger dampening, more trustworthy
-
-
-
-            # FIX 7: domain age adjustment (non-override URLs only)
-            domain = self._registered_domain(url)
-            proba, age_note = adjust_confidence_by_domain_age(proba, domain)
-
-            label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
-            return {
-                "prediction": label,
-                "confidence": round(proba * 100, 2),
-                "threshold" : round(self.threshold * 100, 2),
-                "source"    : "model",
-                "domain_age": age_note,
-            }
-        except Exception as exc:
-            return {
-                "prediction": "BENIGN",
-                "confidence": 0.0,
-                "threshold" : round(self.threshold * 100, 2),
-                "source"    : "invalid",
-                "error"     : str(exc),
-            }
+        age = "skipped_trusted"
+        if level != "strong":                                       # v2: no WHOIS for strong trust
+            proba, age = adjust_confidence_by_domain_age(proba, p["registered"])
+        return dict(proba=proba, raw_proba=raw_proba, age=age, trust_applied=trust_applied,
+                    forced=None)
 
     # ── predict_url ───────────────────────────────────────────────────────────
 
     def predict_url(self, url: str) -> dict:
+        return self._predict(url, depth=0)
+
+    def _threshold_pct(self) -> float:
+        return round(self.threshold * 100, 2)
+
+    def _predict(self, url: str, depth: int) -> dict:
         if not url or not isinstance(url, str):
-            return {
-                "url": url, "prediction": "BENIGN",
-                "confidence": 0.0,
-                "threshold" : round(self.threshold * 100, 2),
-                "source"    : "invalid",
-            }
+            return {"url": url, "prediction": "BENIGN", "confidence": 0.0,
+                    "threshold": self._threshold_pct(), "source": "invalid"}
 
         original_url = url
         resolved_url = None
         unshortened  = None
+        hostname     = None
+        ip           = None
 
-        # Layer 0: Smart Whitelist (FIX 11)
-        if _is_safe_whitelist_url(url):
-            return {
-                "url"       : original_url,
-                "prediction": "BENIGN",
-                "confidence": 100.0,
-                "threshold" : round(self.threshold * 100, 2),
-                "source"    : "whitelist",
-            }
+        # Layer 1: Google Safe Browsing (every URL, trusted or not)
+        p0 = parse_url(url)
+        quick_trust = p0["registered"] in WHITELIST and not p0["userinfo"]
+        if GSB_FOR_TRUSTED or not quick_trust:
+            is_mal, threat_type = check_google_safe_browsing(url)
+            if is_mal:
+                return {"url": original_url, "prediction": "MALICIOUS", "confidence": 100.0,
+                        "threshold": self._threshold_pct(), "source": "google_safe_browsing",
+                        "threat_type": threat_type}
 
-    # Layer 1: Google Safe Browsing
-        is_mal, threat_type = check_google_safe_browsing(url)
-        if is_mal:
-            return {
-                "url"        : original_url,
-                "prediction" : "MALICIOUS",
-                "confidence" : 100.0,
-                "threshold"  : round(self.threshold * 100, 2),
-                "source"     : "google_safe_browsing",
-                "threat_type": threat_type,
-            }
+        # Raw IP + no HTTPS -> MALICIOUS before reverse DNS (reverse DNS would hide the IP)
+        if _extract_ip(url) and p0["scheme"] != "https":
+            return {"url": original_url, "prediction": "MALICIOUS", "confidence": 85.0,
+                    "threshold": self._threshold_pct(), "source": "model",
+                    "domain_age": "skipped_ip"}
 
-        # FIX 14 MOVED HERE: raw IP + no HTTPS → MALICIOUS before reverse DNS
-        # Problem: reverse DNS resolves IP to hostname first, then ip_flag=0
-        # so FIX 14 inside _classify() never fired on the resolved URL
-        if _extract_ip(url) and not url.startswith("https"):
-            return {
-                "url"        : original_url,
-                "prediction" : "MALICIOUS",
-                "confidence" : 85.0,
-                "threshold"  : round(self.threshold * 100, 2),
-                "source"     : "model",
-                "domain_age" : "skipped_ip",
-            }
-
-
-        # Reverse DNS for IP URLs
+        # Reverse DNS for IP URLs / unshorten short links
         ip = _extract_ip(url)
         if ip:
             hostname = reverse_dns(ip)
             if hostname:
                 resolved_url = url.replace(ip, hostname)
-                if _is_safe_whitelist_url(resolved_url):
-                    return {
-                        "url"        : original_url,
-                        "prediction" : "BENIGN",
-                        "confidence" : 100.0,
-                        "threshold"  : round(self.threshold * 100, 2),
-                        "source"     : "whitelist",
-                        "resolved_ip": hostname,
-                    }
                 url = resolved_url
         elif _is_shortener(url):
             final_url, was_redirected = unshorten_url(url)
             if was_redirected:
                 unshortened = final_url
-                if _is_safe_whitelist_url(final_url):
-                    return {
-                        "url"        : original_url,
-                        "prediction" : "BENIGN",
-                        "confidence" : 100.0,
-                        "threshold"  : round(self.threshold * 100, 2),
-                        "source"     : "whitelist",
-                        "unshortened": final_url,
-                    }
+                is_mal, threat_type = check_google_safe_browsing(final_url)
+                if is_mal:
+                    return {"url": original_url, "prediction": "MALICIOUS", "confidence": 100.0,
+                            "threshold": self._threshold_pct(), "source": "google_safe_browsing",
+                            "threat_type": threat_type, "unshortened": final_url}
                 url = final_url
 
-        # Layer 2: ML Model
-        brand_name, real_domain = detect_brand(url)
-        result        = self._classify(url)
-        result["url"] = original_url
+        # Layer 2 + 3: trust assessment and rule layer
+        p     = parse_url(url)
+        trust = assess_trust(p)
+        rules = ts.analyze(url)
 
-        if brand_name:
+        # Redirect target in the query string: judge where the link really goes
+        if trust["redirect_target"] and depth == 0:
+            target = self._predict(trust["redirect_target"], depth=1)
+            if target["prediction"] == "MALICIOUS":
+                trust["evidence"].append("redirect_to_malicious")
+                return {"url": original_url, "prediction": "MALICIOUS",
+                        "confidence": max(target["confidence"], 90.0),
+                        "threshold": self._threshold_pct(), "source": "model",
+                        "domain_age": "skipped_redirect", "evidence": trust["evidence"],
+                        "redirect_target": trust["redirect_target"]}
+
+        hard_hit = (rules["score"] >= RULE_HARD_SCORE and rules["where"] != "path") \
+            or "userinfo_domain" in trust["evidence"]
+        if hard_hit:
+            trust = dict(trust, level="none")                      # trust never survives a hard hit
+
+        # Layer 4 + 5: model, overrides, trust, domain age
+        try:
+            sc = self._score(url, p, trust, rules)
+        except Exception as exc:
+            return {"url": original_url, "prediction": "BENIGN", "confidence": 0.0,
+                    "threshold": self._threshold_pct(), "source": "invalid", "error": str(exc)}
+
+        if sc["forced"]:                                           # an override fired: not "trusted"
+            trust = dict(trust, level="none")
+        proba = sc["proba"]
+        label = "MALICIOUS" if proba >= self.threshold else "BENIGN"
+        trusted = trust["level"] != "none"
+
+        if trusted and label == "BENIGN":
+            # externally identical to the old whitelist answer, but it was analysed
+            result = {"url": original_url, "prediction": "BENIGN", "confidence": 100.0,
+                      "threshold": self._threshold_pct(), "source": "whitelist",
+                      "whitelisted": True, "trust": trust["level"],
+                      "risk_score": round(proba * 100, 2)}
+        else:
+            result = {"url": original_url, "prediction": label,
+                      "confidence": round(proba * 100, 2),
+                      "threshold": self._threshold_pct(), "source": "model",
+                      "domain_age": sc["age"]}
+            if trusted:
+                result.update(whitelisted=True, trust=trust["level"])
+
+        brand_name, real_domain = detect_brand(url, rules)
+        if brand_name and not (trusted and label == "BENIGN"):
             result["brand_detected"] = brand_name
             result["real_domain"]    = real_domain
+        if rules["score"] >= RULE_SOFT_SCORE and rules["where"] != "path":
+            result["rules"] = [f"{m['technique']}:{m['brand']}" for m in rules["matches"][:3]]
+        if trust["evidence"]:
+            result["evidence"] = trust["evidence"]
         if resolved_url and ip:
             result["resolved_ip"] = hostname
         if unshortened:
             result["unshortened"] = unshortened
-
         return result
 
-    def predict_batch(self, urls: list[str]) -> list[dict]:
+    def predict_batch(self, urls: list) -> list:
         return [self.predict_url(u) for u in urls]
 
     # ── explain_url ───────────────────────────────────────────────────────────
@@ -1042,6 +1110,15 @@ class URLClassifier:
         domain        = self._registered_domain(classify_url)
         age_days      = get_domain_age_days(domain)
 
+        # v2: rule and evidence reasons come first: they are the most specific explanation
+        lead: list = []
+        rules = ts.analyze(classify_url)
+        if rules["score"] >= RULE_SOFT_SCORE and rules["where"] != "path":
+            lead.append(rule_reason(rules["matches"][0]))
+        for code in base.get("evidence", []):
+            if code in _EVIDENCE_TEXT and _EVIDENCE_TEXT[code] not in lead:
+                lead.append(_EVIDENCE_TEXT[code])
+
         try:
             explainer = self._get_explainer()
             fv        = self._feature_vector(classify_url)
@@ -1050,10 +1127,10 @@ class URLClassifier:
                 data_row     = fv,
                 predict_fn   = self._lime_predict_fn,
                 num_features = num_features,
-                 labels       = (1,),
+                labels       = (1,),
             )
 
-            explanation, reasons, seen = [], [], set()
+            explanation, reasons, seen = [], [], set(lead)
 
             for condition_str, weight in exp.as_list(label=1):
                 feat_name = _parse_lime_feature(condition_str)
@@ -1069,9 +1146,8 @@ class URLClassifier:
                 })
 
                 if weight > 0:
-                    if feat_name == "https_flag":
-                        if raw_heuristic[_FEAT_IDX.get("https_flag", -1)] == 1.0:
-                            continue
+                    if feat_name == "https_flag":                   # v2: scheme is not a feature
+                        continue
                     nl = feature_to_natural_language(
                         feat_name, weight, feat_val, brand_name, real_domain
                     )
@@ -1080,7 +1156,7 @@ class URLClassifier:
                         reasons.append(nl)
 
             explanation.sort(key=lambda x: abs(x["weight"]), reverse=True)
-            top_reasons = reasons[:3]
+            top_reasons = (lead + reasons)[:3]
 
             if len(top_reasons) < 3:
                 top_reasons.extend(
@@ -1105,9 +1181,9 @@ class URLClassifier:
 
         except Exception as exc:
             backup = _build_backup_reasons(
-                raw_heuristic, brand_name, real_domain, set(), 3
+                raw_heuristic, brand_name, real_domain, set(lead), max(0, 3 - len(lead))
             )
-            return {**base, "explanation": [], "reasons": backup,
+            return {**base, "explanation": [], "reasons": (lead + backup)[:3],
                     "explain_error": str(exc)}
 
     # ── LIME internals ────────────────────────────────────────────────────────
@@ -1143,12 +1219,16 @@ class URLClassifier:
     def _load_background(self, n_samples: int = 500) -> np.ndarray:
         bg_path = os.path.join(MODELS_DIR, "lime_background.npz")
         if os.path.exists(bg_path):
-            return np.load(bg_path)["X"]
+            bg = np.load(bg_path)["X"]
+            if bg.shape[1] == len(FEATURE_NAMES):                   # v2: ignore a stale background
+                return bg
+            warnings.warn("lime_background.npz has a different feature count: rebuilding it.",
+                          RuntimeWarning, stacklevel=3)
 
-        warnings.warn(f"{bg_path} not found — building LIME background.",
+        warnings.warn(f"{bg_path} not found or stale — building LIME background.",
                       RuntimeWarning, stacklevel=3)
         import csv, random
-        csv_path = os.path.join(_ROOT, "data", "splits", "train_urls.csv")
+        csv_path = os.path.join(_ROOT, "data", "splits_v2", "train_urls.csv")   # v2: new split
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"Cannot find {bg_path} or {csv_path}.")
 
@@ -1184,3 +1264,65 @@ def _parse_lime_feature(condition_str: str) -> str:
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 classifier = URLClassifier()
+
+
+# ════════════════════════════════════════════════════════════════
+# v2: SELF-TEST  (python app/model_loader.py)
+# ════════════════════════════════════════════════════════════════
+# (url, expected prediction or None = just report, note)
+_SELFTEST_CASES = [
+    # lookalikes and tricks: must be MALICIOUS whatever the model says
+    ("https://www.google.com.evil.tk/",               "MALICIOUS", "brand domain inside the subdomain"),
+    ("https://gooogle.com/",                          "MALICIOUS", "doubled letter"),
+    ("https://paypal-secure.com/",                    "MALICIOUS", "combosquat"),
+    ("https://paypa1.com/login",                      "MALICIOUS", "homoglyph"),
+    ("https://arnazon.com/",                          "MALICIOUS", "rn -> m"),
+    ("https://wwwgoogle.com/",                        "MALICIOUS", "www glued to the name"),
+    ("https://paypal.weebly.com/",                    "MALICIOUS", "brand as shared-platform tenant"),
+    ("https://google.com@evil.tk/login",              "MALICIOUS", "user@host trick"),
+    ("https://www.google.com/url?q=https://paypa1-login.com/", "MALICIOUS", "trusted host redirecting to a lookalike"),
+    ("https://paypal-verify.ac.lk/",                  "MALICIOUS", "phishing name on an academic suffix"),
+    ("https://phishing-login.edu.lk/",                "MALICIOUS", "suspicious word on an academic suffix"),
+    # trusted hosts: must stay BENIGN (trusted, but analysed)
+    ("https://www.google.com/search?q=cats+and+dogs&hl=en&source=hp", "BENIGN", "long Google search URL"),
+    ("https://accounts.google.com/signin/v2/identifier", "BENIGN", "trusted subdomain"),
+    ("https://github.com/google/guava",               "BENIGN", "brand in path of a trusted host"),
+    ("https://docs.python.org/3/library/re.html",     "BENIGN", "trusted subdomain"),
+    ("https://www.amazon.co.uk/",                     "BENIGN", "multi-part suffix"),
+    # informational: depends on the model, shown for tuning
+    ("https://staal.github.com/",                     None, "unknown subdomain of a trusted domain (weak trust)"),
+    ("https://uom.ac.lk/",                            None, "academic suffix (weak trust)"),
+    ("https://someone.github.io/",                    None, "shared platform tenant (no trust)"),
+]
+
+
+def _selftest() -> int:
+    global WHOIS_ENABLED, GSB_API_KEY
+    WHOIS_ENABLED, GSB_API_KEY = False, ""          # offline and deterministic
+    print("\nMODEL LOADER SELF-TEST (WHOIS and Safe Browsing off)")
+    print(f"model features: {classifier.model.n_features_in_} | threshold: {classifier.threshold:.2f}\n")
+    failed = 0
+    for url, expected, note in _SELFTEST_CASES:
+        r = classifier.predict_url(url)
+        ok = expected is None or r["prediction"] == expected
+        failed += 0 if ok else 1
+        tag = "info" if expected is None else ("PASS" if ok else "FAIL")
+        extra = []
+        if r.get("trust"):
+            extra.append(f"trust={r['trust']}")
+        if r.get("rules"):
+            extra.append("rules=" + ",".join(r["rules"][:2]))
+        if r.get("evidence"):
+            extra.append("evidence=" + ",".join(r["evidence"]))
+        if "risk_score" in r:
+            extra.append(f"risk={r['risk_score']}")
+        print(f"[{tag}] {r['prediction']:<9} {r['confidence']:>6.1f}  {url}")
+        print(f"        {note}  {' '.join(extra)}")
+    print(f"\n{'ALL REQUIRED CASES PASSED' if not failed else str(failed) + ' CASE(S) FAILED'}")
+    print("A FAIL on a trusted URL usually means the model probability for that URL is above "
+          "TRUST_FLIP_PROBA: look at the risk/confidence value and tune the settings at the top.")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(_selftest())
