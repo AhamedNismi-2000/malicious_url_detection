@@ -132,6 +132,7 @@ NGRAM_CHAR    = (2, 4)
 NGRAM_WORD    = (1, 2)
 MIN_DF        = 3
 CHUNK_SIZE    = 50_000
+TLD_BLIND_TEXT = True
 
 # ─────────────────────────── CONSTANTS ───────────────────────
 SHORTENERS = {
@@ -834,6 +835,28 @@ def extract_heuristic_batch(urls: list) -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════
 # NLP - LEXICAL SEGMENTATION
 # ═══════════════════════════════════════════════════════════════
+ 
+# ═══════════════════════════════════════════════════════════════
+# NLP - LEXICAL SEGMENTATION
+# ═══════════════════════════════════════════════════════════════
+
+def _strip_public_suffix(s: str) -> str:                                   # v2:
+    """'login.paypal-x.co.uk/a?b' -> 'login.paypal-x/a?b' (host only, path untouched)."""
+    m = re.search(r"[/?#]", s)
+    cut = m.start() if m else len(s)
+    authority, tail = s[:cut], s[cut:]
+    userinfo, at, hostport = authority.rpartition("@")
+    if hostport.startswith("["):
+        return s
+    host, colon, port = hostport.partition(":")
+    if not host or has_ip_address(host):
+        return s
+    ext = EXTRACTOR(host)
+    if not ext.suffix or not ext.domain:
+        return s
+    new_host = ".".join(p for p in (ext.subdomain, ext.domain) if p)
+    return userinfo + at + new_host + colon + port + tail
+
 
 def segment_url(url: str) -> str:
     """
@@ -848,13 +871,14 @@ def segment_url(url: str) -> str:
         url = unquote(url)
     except Exception:
         pass
+    if TLD_BLIND_TEXT:                                                     # v2:
+        url = _strip_public_suffix(url)                                    # v2:
     tokens = re.split(r"[-._/=?&+~,;:@\s]+", url)
     tokens = [
         t for t in tokens
         if len(t) >= 2 and not (t.isdigit() and len(t) < 3)
     ]
     return " ".join(tokens)
-
 
 def fit_vectorizers(train_urls: list):
     logger.info("   Segmenting URLs for NLP...")
@@ -924,6 +948,7 @@ def save_feature_config(feature_names: list, n_char: int, n_word: int) -> None:
         typosquat_feature_names=ts.FEATURE_NAMES,
         input_normalisation="scheme and leading www. removed before features",
         whitelist="built-in REAL_BRAND_DOMAINS only (no Tranco list in features)",
+        tld_blind_text=TLD_BLIND_TEXT,
     )
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
